@@ -1,6 +1,6 @@
 # AI Vision Metadata
 
-**Version:** 1.0.0  
+**Version:** 1.1.0  
 **Author:** RelUnrelated (<dan@relunrelated.com>)  
 **License:** GNU General Public License v3.0 (GPLv3) — See the `LICENSE.md` file for details.  
 **Changelog:** See the `CHANGELOG.md` file for release history and updates.  
@@ -14,7 +14,7 @@ Originally built around Google's Gemini API, the plugin has evolved into a robus
 
 ## Key Features
 
-* **Multi-Provider Routing:** Seamlessly switch between cloud-based AI models (Google Gemini, OpenAI, Anthropic) or route requests to your own local, offline models using Ollama or LM Studio.
+* **Multi-Provider Routing:** Seamlessly switch between cloud-based AI models (Google Gemini, OpenAI, Anthropic, OpenRouter) or route requests to your own local, offline models using Ollama or LM Studio.
 * **Sequential Batch Processing:** Select multiple publications at once. The plugin intelligently queues the requests in the background, preventing rate-limit bans and UI lockups.
 * **Side-by-Side Review GUI:** Never fly blind. The plugin presents a crisp, scaled thumbnail of the cover image right next to the extracted metadata, allowing you to easily verify the AI's accuracy.
 * **Isolated Memory Banks:** The configuration menu securely remembers your distinct API keys, model selections, and custom system prompts for every individual provider.
@@ -36,7 +36,7 @@ Since this is a custom plugin, it must be installed manually through Calibre's i
 Before using the tool, you must configure it with an API key or a local server address.
 
 1. Go to **Preferences > Plugins** and locate **AI Vision Metadata** under the *User interface action* category. Double-click to open the configuration window.
-2. **AI Provider:** Select your preferred AI engine from the dropdown (Google Gemini, OpenAI, Anthropic, or Local). The UI will dynamically update to show the settings for that specific provider.
+2. **AI Provider:** Select your preferred AI engine from the dropdown (Google Gemini, OpenAI, Anthropic, OpenRouter, or Local). The UI will dynamically update to show the settings for that specific provider. OpenRouter will populate its model list without an API key.
 3. **API Key / Local URL:** Paste your API key for the selected cloud provider. If using a local model, ensure your Local Base URL is correct (e.g., `http://localhost:11434` for Ollama).
 4. **Model Name:** Click **Fetch Available Models** to populate the dropdown menu directly from your chosen provider, then select the specific model you wish to use.
 5. **System Prompt (Advanced):** You can safely tweak the AI's core instructions here. Every provider remembers its own prompt.
@@ -69,6 +69,10 @@ To use the cloud features of this plugin, you will need to generate an API key f
 **Anthropic (Claude)**
 * Navigate to the [Anthropic Console](https://console.anthropic.com/settings/keys) to generate a key.
 * *Requirements:* Like OpenAI, Anthropic requires you to load prepaid credits to your account before API requests will be authorized (otherwise you will receive an immediate HTTP 400 error).
+
+**OpenRouter**
+* Navigate to the [OpenRouter Console](https://openrouter.ai/settings/keys) to generate a key.
+* *Requirements:* OpenRouter provides access to a large variety of models from over sixty providers. OpenRouter requires you to load prepaid credits to your account before API requests will be authorized. The list of models in the configuration window will contain all of those which support image input.
 
 **Local Models (Ollama / LM Studio)**
 * You can run vision-capable models (like `llava`) completely offline on your own hardware.

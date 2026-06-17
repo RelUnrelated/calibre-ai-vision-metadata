@@ -5,6 +5,7 @@ import json
 import urllib.request
 import datetime
 import os
+import typing
 from qt.core import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
                      QComboBox, QPushButton, QMessageBox, QIcon, QPixmap, 
                      pyqtSignal, Qt, QObject, QSpinBox, QMenu, QTextEdit)
@@ -13,6 +14,16 @@ from calibre.gui2 import error_dialog
 from calibre.gui2.actions import InterfaceAction
 from calibre.gui2.threaded_jobs import ThreadedJob
 from calibre_plugins.ai_vision_metadata.config import prefs
+
+# This block is only 'True' when PyCharm is reading the code.
+# When Calibre runs the code, this is 'False' and gets completely ignored!
+if typing.TYPE_CHECKING:
+    def load_translations():
+        pass
+
+
+    def _(text: str) -> str:
+        return text
 
 try:
     load_translations()
@@ -57,7 +68,7 @@ class ConfigWidget(QWidget):
         self.l.addWidget(self.label_provider)
         
         self.provider_combo = QComboBox(self)
-        self.providers = ['Google Gemini', 'OpenAI', 'Anthropic', 'Local (Ollama/LM Studio)']
+        self.providers = ['Google Gemini', 'OpenAI', 'Anthropic', 'OpenRouter', 'Local (Ollama/LM Studio)']
         self.provider_combo.addItems(self.providers)
         
         # --- Load saved provider, defaulting to Google ---
@@ -89,6 +100,11 @@ class ConfigWidget(QWidget):
         self.key_anthropic = QLineEdit(self)
         self.key_anthropic.setText(prefs.get('api_key_anthropic', ''))
         self.l.addWidget(self.key_anthropic)
+        
+        # OpenRouter Key
+        self.key_openrouter = QLineEdit(self)
+        self.key_openrouter.setText(prefs.get('api_key_openrouter', ''))
+        self.l.addWidget(self.key_openrouter)
         
         # --- 3. Local Base URL Field ---
         self.label_url = QLabel(_('Local Base URL (e.g., http://localhost:11434):'))
@@ -122,10 +138,18 @@ class ConfigWidget(QWidget):
         # Anthropic Model
         self.model_anthropic = QComboBox(self)
         self.model_anthropic.setEditable(True)
-        saved_anthropic = prefs.get('model_anthropic', 'claude-3-7-sonnet-latest')
+        saved_anthropic = prefs.get('model_anthropic', 'claude-sonnet-4-6')
         self.model_anthropic.addItem(saved_anthropic)
         self.model_anthropic.setCurrentText(saved_anthropic)
         self.model_layout.addWidget(self.model_anthropic)
+        
+        # OpenRouter Model
+        self.model_openrouter = QComboBox(self)
+        self.model_openrouter.setEditable(True)
+        saved_openrouter = prefs.get('model_openrouter', 'openrouter/auto')
+        self.model_openrouter.addItem(saved_openrouter)
+        self.model_openrouter.setCurrentText(saved_openrouter)
+        self.model_layout.addWidget(self.model_openrouter)
         
         # Local Model
         self.model_local = QComboBox(self)
@@ -183,6 +207,13 @@ class ConfigWidget(QWidget):
         self.prompt_anthropic.setPlainText(prefs.get('prompt_anthropic', DEFAULT_PROMPT))
         self.l.addWidget(self.prompt_anthropic)
         
+        # OpenRouter Prompt
+        self.prompt_openrouter = QTextEdit(self)
+        self.prompt_openrouter.setAcceptRichText(False)
+        self.prompt_openrouter.setMinimumHeight(150)
+        self.prompt_openrouter.setPlainText(prefs.get('prompt_openrouter', DEFAULT_PROMPT))
+        self.l.addWidget(self.prompt_openrouter)
+        
         # Local Prompt
         self.prompt_local = QTextEdit(self)
         self.prompt_local.setAcceptRichText(False)
@@ -202,15 +233,18 @@ class ConfigWidget(QWidget):
         self.key_google.setVisible(False)
         self.key_openai.setVisible(False)
         self.key_anthropic.setVisible(False)
+        self.key_openrouter.setVisible(False)
         # Hide all model combos first
         self.model_google.setVisible(False)
         self.model_openai.setVisible(False)
         self.model_anthropic.setVisible(False)
+        self.model_openrouter.setVisible(False)
         self.model_local.setVisible(False)        
         # Hide all prompt editing areas first
         self.prompt_google.setVisible(False)
         self.prompt_openai.setVisible(False)
         self.prompt_anthropic.setVisible(False)
+        self.prompt_openrouter.setVisible(False)
         self.prompt_local.setVisible(False)
         
         if provider == 'Local (Ollama/LM Studio)':
@@ -240,6 +274,11 @@ class ConfigWidget(QWidget):
                 self.key_anthropic.setVisible(True)
                 self.model_anthropic.setVisible(True)
                 self.prompt_anthropic.setVisible(True)
+            elif provider == 'OpenRouter':
+                self.link_label.setText('<a href="https://openrouter.ai/settings/keys">' + _("Get OpenRouter API Key") + '</a>')
+                self.key_openrouter.setVisible(True)
+                self.model_openrouter.setVisible(True)
+                self.prompt_openrouter.setVisible(True)
 
     def fetch_models(self):
         provider = self.provider_combo.currentText()
@@ -255,12 +294,15 @@ class ConfigWidget(QWidget):
         elif provider == 'Anthropic':
             api_key = self.key_anthropic.text().strip()
             active_combo = self.model_anthropic
+        elif provider == 'OpenRouter':
+            api_key = self.key_openrouter.text().strip()
+            active_combo = self.model_openrouter
         else:
             api_key = "" 
             active_combo = self.model_local
             
         # --- 2. Validation ---
-        if provider != 'Local (Ollama/LM Studio)' and not api_key:
+        if provider not in ['Local (Ollama/LM Studio)', 'OpenRouter'] and not api_key:
             QMessageBox.warning(self, _("Missing Key"), _("Please enter your API key for {0}.").format(provider))
             return
             
@@ -298,14 +340,41 @@ class ConfigWidget(QWidget):
                         active_combo.addItem(model_id)
                         
             elif provider == 'Anthropic':
-                anthropic_models = [
-                    'claude-3-7-sonnet-latest',
-                    'claude-3-5-sonnet-latest', 
-                    'claude-3-5-haiku-latest',
-                    'claude-3-opus-latest'
-                ]
-                active_combo.addItems(anthropic_models)
+                url = "https://api.anthropic.com/v1/models"
+                # Anthropic requires their specific version header alongside the key
+                req = urllib.request.Request(url, headers={
+                    'x-api-key': api_key,
+                    'anthropic-version': '2023-06-01'
+                })
                 
+                with urllib.request.urlopen(req, timeout=15) as response:
+                    data = json.loads(response.read().decode('utf-8'))
+                
+                for model in data.get('data', []):
+                    model_id = model.get('id', '')
+                    # All current Claude models (from Claude 3 through the newest Claude 4 and 5 series) 
+                    # support multimodal vision natively.
+                    if 'claude' in model_id:
+                        active_combo.addItem(model_id)
+                
+            elif provider == 'OpenRouter':
+                url = "https://openrouter.ai/api/v1/models"
+                req = urllib.request.Request(url) 
+                with urllib.request.urlopen(req, timeout=15) as response:
+                    data = json.loads(response.read().decode('utf-8'))
+                
+                for model in data.get('data', []):
+                    model_id = model.get('id', '')
+                    
+                    # 1. Safely extract the architectural modality string
+                    architecture = model.get('architecture', {})
+                    # Default to an empty string if it's missing, then make it lowercase
+                    modality = architecture.get('modality', '').lower() if architecture else ''
+                    
+                    # 2. Check if it officially accepts images, OR fallback to our string checks
+                    if 'image' in modality or 'vision' in model_id or 'llava' in model_id or 'claude' in model_id:
+                        active_combo.addItem(model_id)
+                        
             elif provider == 'Local (Ollama/LM Studio)':
                 url = f"{local_url}/v1/models"
                 req = urllib.request.Request(url)
@@ -343,18 +412,21 @@ class ConfigWidget(QWidget):
         prefs['api_key_google'] = self.key_google.text().strip()
         prefs['api_key_openai'] = self.key_openai.text().strip()
         prefs['api_key_anthropic'] = self.key_anthropic.text().strip()
+        prefs['api_key_openrouter'] = self.key_openrouter.text().strip()
         prefs['local_url'] = self.url_input.text().strip()
         
         # 3. Save Models
         prefs['model_google'] = self.model_google.currentText().strip()
         prefs['model_openai'] = self.model_openai.currentText().strip()
         prefs['model_anthropic'] = self.model_anthropic.currentText().strip()
+        prefs['model_openrouter'] = self.model_openrouter.currentText().strip()
         prefs['model_local'] = self.model_local.currentText().strip()
         
         # 4. Save Custom Prompts
         prefs['prompt_google'] = self.prompt_google.toPlainText().strip()
         prefs['prompt_openai'] = self.prompt_openai.toPlainText().strip()
         prefs['prompt_anthropic'] = self.prompt_anthropic.toPlainText().strip()
+        prefs['prompt_openrouter'] = self.prompt_openrouter.toPlainText().strip()
         prefs['prompt_local'] = self.prompt_local.toPlainText().strip()
         
         # 5. Save General Settings
@@ -481,8 +553,25 @@ class AIVisionAction(InterfaceAction):
         import time
         start_time = time.time() # --- Start the clock ---
 
-        with open(cover_path, "rb") as f:
-            img_data = base64.b64encode(f.read()).decode('utf-8')
+        from qt.core import QImage, QByteArray, QBuffer, Qt
+        
+        # 1. Load the image into memory using Qt
+        img = QImage(cover_path)
+        
+        # 2. Check if the image is massive. If so, scale it down to a max of 2000px
+        max_size = 2000
+        if img.width() > max_size or img.height() > max_size:
+            img = img.scaled(max_size, max_size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            
+        # 3. Save the optimized image to a temporary memory buffer as a JPEG
+        byte_array = QByteArray()
+        buffer = QBuffer(byte_array)
+        buffer.open(QBuffer.OpenModeFlag.WriteOnly)
+        # 85% quality is visually indistinguishable and perfect for AI OCR
+        img.save(buffer, "JPEG", quality=85) 
+        
+        # 4. Encode the lightweight memory buffer to Base64
+        img_data = base64.b64encode(byte_array.data()).decode('utf-8')
 
         provider = prefs.get('ai_provider', 'Google Gemini')
         local_url = prefs.get('local_url', 'http://localhost:11434').rstrip('/')
@@ -498,8 +587,12 @@ class AIVisionAction(InterfaceAction):
             prompt = prefs.get('prompt_openai', DEFAULT_PROMPT)
         elif provider == 'Anthropic':
             api_key = prefs.get('api_key_anthropic', '')
-            model_name = prefs.get('model_anthropic', 'claude-3-7-sonnet-latest')
+            model_name = prefs.get('model_anthropic', 'claude-sonnet-4-6')
             prompt = prefs.get('prompt_anthropic', DEFAULT_PROMPT)
+        elif provider == 'OpenRouter':
+            api_key = prefs.get('api_key_openrouter', '')
+            model_name = prefs.get('model_openrouter', 'openrouter/auto')
+            prompt = prefs.get('prompt_openrouter', DEFAULT_PROMPT)
         else:
             api_key = ""
             model_name = prefs.get('model_local', 'llava')
@@ -524,10 +617,15 @@ class AIVisionAction(InterfaceAction):
                 "tools": [{"googleSearch": {}}]
             }
 
-        elif provider in ['OpenAI', 'Local (Ollama/LM Studio)']:
+        elif provider in ['OpenAI', 'OpenRouter', 'Local (Ollama/LM Studio)']:
             if provider == 'OpenAI':
                 url = "https://api.openai.com/v1/chat/completions"
                 headers['Authorization'] = f'Bearer {api_key}'
+            elif provider == 'OpenRouter':
+                url = "https://openrouter.ai/api/v1/chat/completions" # Fixed endpoint
+                headers['Authorization'] = f'Bearer {api_key}'
+                headers['HTTP-Referer'] = "https://www.mobileread.com/forums/showthread.php?t=372744"
+                headers['X-Title'] = "Calibre AI Vision Metadata Plugin"
             else:
                 url = f"{local_url}/v1/chat/completions"
 
@@ -542,7 +640,7 @@ class AIVisionAction(InterfaceAction):
                         ]
                     }
                 ],
-                # This explicitly tells OpenAI/Ollama to format their output as JSON
+                # This explicitly tells OpenAI/OpenRouter/Ollama to format their output as JSON
                 "response_format": {"type": "json_object"} 
             }
 
@@ -575,6 +673,7 @@ class AIVisionAction(InterfaceAction):
              return {"error_msg": _("Unknown AI Provider selected.")}
 
         import urllib.error
+        import time
         
         # Fetch the user-defined timeout, defaulting to 300 if not found
         timeout_val = int(prefs.get('timeout', 300))
@@ -585,34 +684,53 @@ class AIVisionAction(InterfaceAction):
             req = urllib.request.Request(url, data=data, headers=headers, method='POST')
             # -----------------------------------------------------------------------------
 
-            try:
-                # Pass the dynamic timeout variable to the request
-                with urllib.request.urlopen(req, timeout=timeout_val) as response:
-                    res_json = json.loads(response.read().decode('utf-8'))
-                    
-            except urllib.error.HTTPError as http_err:
-                error_body = http_err.read().decode('utf-8')
-                try:
-                    # Attempt to parse the JSON error response
-                    error_json = json.loads(error_body)
-                    
-                    # Google, OpenAI, and Anthropic all conveniently use this exact nested structure!
-                    clean_msg = error_json.get('error', {}).get('message', error_body)
-                    
-                    # --- Dynamically inject the provider name ---
-                    return {"error_msg": _("{0} API Error ({1}): {2}").format(provider, http_err.code, clean_msg)}
-                    # --------------------------------------------
-                    
-                except json.JSONDecodeError:
-                    # Fallback just in case the server sends a plain HTML error page
-                    return {"error_msg": _("{0} API Error (HTTP {1}): {2}").format(provider, http_err.code, error_body)}
+            max_retries = 3
+            base_delay = 2
+            res_json = None
 
-            except TimeoutError:
-                return {"error_msg": _("The AI took too long to analyze the cover and search the web. Please try again.")}
-            except urllib.error.URLError as url_err:
-                return {"error_msg": _("Network connection failed: {0}").format(url_err.reason)}
-            except Exception as e:
-                return {"error_msg": _("An unexpected error occurred: {0}").format(str(e))}
+            for attempt in range(max_retries):
+                try:
+                    # Pass the dynamic timeout variable to the request
+                    with urllib.request.urlopen(req, timeout=timeout_val) as response:
+                        res_json = json.loads(response.read().decode('utf-8'))
+                    
+                    # If the call succeeds, break out of the retry loop immediately!
+                    break 
+
+                except urllib.error.HTTPError as http_err:
+                    # Check specifically for Google 503s or generic 429 Rate Limits
+                    if http_err.code in [429, 503] and attempt < max_retries - 1:
+                        sleep_time = base_delay * (2 ** attempt)
+                        time.sleep(sleep_time)
+                        continue # Loop around and try the request again
+                    else:
+                        # Out of retries, OR it's a non-retriable error (like 401 Unauthorized)
+                        error_body = http_err.read().decode('utf-8')
+                        try:
+                            # Attempt to parse the JSON error response
+                            error_json = json.loads(error_body)
+                            
+                            # Google, OpenAI, and Anthropic all conveniently use this exact nested structure!
+                            clean_msg = error_json.get('error', {}).get('message', error_body)
+                            
+                            # --- Dynamically inject the provider name ---
+                            return {"error_msg": _("{0} API Error ({1}): {2}").format(provider, http_err.code, clean_msg)}
+                            # --------------------------------------------
+                            
+                        except json.JSONDecodeError:
+                            # Fallback just in case the server sends a plain HTML error page
+                            return {"error_msg": _("{0} API Error (HTTP {1}): {2}").format(provider, http_err.code, error_body)}
+
+                except TimeoutError:
+                    return {"error_msg": _("The AI took too long to analyze the cover and search the web. Please try again.")}
+                except urllib.error.URLError as url_err:
+                    return {"error_msg": _("Network connection failed: {0}").format(url_err.reason)}
+                except Exception as e:
+                    return {"error_msg": _("An unexpected error occurred: {0}").format(str(e))}
+
+            # Failsafe: if the loop finishes and we somehow don't have res_json
+            if not res_json:
+                return {"error_msg": _("API Error: {0} server was unavailable after multiple retries.").format(provider)}
             
             # --- UNIFIED RESPONSE PARSER ---
             raw_text = ""
@@ -625,7 +743,7 @@ class AIVisionAction(InterfaceAction):
                 if parts:
                     raw_text = parts[0].get('text', '')
 
-            elif provider in ['OpenAI', 'Local (Ollama/LM Studio)']:
+            elif provider in ['OpenAI', 'OpenRouter', 'Local (Ollama/LM Studio)']:
                 choices = res_json.get('choices', [])
                 if choices:
                     raw_text = choices[0].get('message', {}).get('content', '')
@@ -639,28 +757,39 @@ class AIVisionAction(InterfaceAction):
                 return {"error_msg": _("The AI returned an empty response. The model may have failed to process the image.")}
                 
             # --- SURGICAL JSON EXTRACTION ---
-            import re
-            # This looks for everything between the first { and the last }
-            match = re.search(r'\{.*\}', raw_text, re.DOTALL)
+            def extract_json_dict(text_payload):
+                # 1. Strip markdown code blocks if the AI used them
+                if "```json" in text_payload:
+                    text_payload = text_payload.split("```json")[1].split("```")[0]
+                elif "```" in text_payload:
+                    text_payload = text_payload.split("```")[1].split("```")[0]
+                    
+                # 2. Find the absolute first and last curly braces
+                start_idx = text_payload.find('{')
+                end_idx = text_payload.rfind('}')
+                
+                if start_idx != -1 and end_idx != -1:
+                    clean_text = text_payload[start_idx:end_idx+1]
+                    try:
+                        parsed_data = json.loads(clean_text)
+                        # Ensure it returned a dictionary, not a parsed string
+                        if isinstance(parsed_data, dict):
+                            return parsed_data
+                    except json.JSONDecodeError:
+                        pass
+                # Return empty dictionary if all extraction fails
+                return {}
+
+            metadata = extract_json_dict(raw_text)
             
-            if match:
-                clean_json = match.group(0)
-            else:
-                # Fallback just in case it didn't use brackets correctly
-                clean_json = raw_text.replace('```json', '').replace('```', '').strip()
-                
-            try:
-                metadata = json.loads(clean_json)
-                
-                # --- Inject dynamic provider, model, and duration ---
-                elapsed = time.time() - start_time
-                metadata['ai_provider'] = provider
-                metadata['ai_model_used'] = model_name
-                metadata['api_duration'] = round(elapsed, 1) # Rounds to one decimal place
-                # ----------------------------------------------------
-                
-            except json.JSONDecodeError as e:
-                return {"error_msg": _("Data Parsing Error: Could not read AI output.\nRaw Output: {0}...").format(raw_text[:150])}
+            if not metadata:
+                return {"error_msg": _("Data Parsing Error: Could not extract valid JSON from AI output.\nRaw Output: {0}...").format(raw_text[:150])}
+
+            # Inject dynamic provider, model, and duration
+            elapsed = time.time() - start_time
+            metadata['ai_provider'] = provider
+            metadata['ai_model_used'] = model_name
+            metadata['api_duration'] = round(elapsed, 1)
 
             # --- ROMAN NUMERAL CONVERTER ---
             import re
@@ -688,10 +817,30 @@ class AIVisionAction(InterfaceAction):
             # -------------------------------
             
             try:
-                dt = datetime.date(int(metadata['pub_year']), int(metadata['pub_month']), int(metadata['pub_day']))
-                metadata['day_of_year'] = str(dt.timetuple().tm_yday)
-            except:
-                metadata['day_of_year'] = "1"
+                # 1. Ensure we have a valid year first
+                pub_year_raw = metadata.get('pub_year')
+                if not pub_year_raw or not str(pub_year_raw).strip().isdigit():
+                    raise ValueError
+                pub_year = int(pub_year_raw)
+                
+                # 2. Safely parse month and day (If AI gives "00" or empty, assume the 1st)
+                pm = metadata.get('pub_month')
+                pub_month = int(pm) if pm and str(pm).isdigit() and int(pm) > 0 else 1
+                
+                pd = metadata.get('pub_day')
+                pub_day = int(pd) if pd and str(pd).isdigit() and int(pd) > 0 else 1
+
+                # 3. Calculate Julian and Weekly values safely
+                dt = datetime.date(pub_year, pub_month, pub_day)
+                yday = dt.timetuple().tm_yday
+                metadata['day_of_year'] = str(yday)
+                
+                week_num = (yday - 1) // 7 + 1
+                metadata['week_of_year'] = f"{pub_year}.{str(week_num).zfill(2)}"
+                
+            except Exception:
+                # If date parsing fails completely, do NOT inject a fake "1"
+                pass 
                 
             # --- Return the cover_path along with the ID and metadata ---
             return (book_id, metadata, cover_path)

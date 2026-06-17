@@ -1,11 +1,44 @@
 # __license__   = 'GPL v3'
 # __copyright__ = '2026, RelUnrelated <dan@relunrelated.com>'
-from qt.core import QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QFrame, QLineEdit, QComboBox, QCheckBox, QPushButton, QDialogButtonBox, QTextEdit, QPixmap, Qt
+from qt.core import (QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QFrame, 
+                     QLineEdit, QComboBox, QCheckBox, QPushButton, QDialogButtonBox, 
+                     QTextEdit, QPixmap, Qt, QStyledItemDelegate, QPalette)
+
+import typing
+
+# This block is only 'True' when PyCharm is reading the code.
+# When Calibre runs the code, this is 'False' and gets completely ignored!
+if typing.TYPE_CHECKING:
+    def load_translations():
+        pass
+    def _(text: str) -> str:
+        return text
 
 try:
     load_translations()
 except NameError:
     pass
+
+class DropdownDescriptionDelegate(QStyledItemDelegate):
+    def paint(self, painter, option, index):
+        # 1. Let Qt draw the standard item (handles the blue selection background and the main text)
+        super().paint(painter, option, index)
+
+        # 2. Check if we secretly attached a description to this item using the UserRole
+        description = index.data(Qt.ItemDataRole.UserRole)
+        if description:
+            painter.save()
+            
+            # Use the system's muted placeholder color (usually a nice gray)
+            color = option.palette.color(QPalette.ColorRole.PlaceholderText)
+            painter.setPen(color)
+
+            # Draw the description right-aligned with a 5px margin so it doesn't hug the scrollbar
+            rect = option.rect
+            rect.adjust(0, 0, -5, 0)
+            painter.drawText(rect, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, description)
+            
+            painter.restore()
 
 class MetadataReviewDialog(QDialog):
     def __init__(self, parent, metadata, cover_path):
@@ -91,30 +124,39 @@ class MetadataReviewDialog(QDialog):
         def add_indented_combo_field(key, label_text, options, mode):
             row_frame, row_layout = create_row_container()
             
-            unique_opts = []
-            for opt in options:
-                if opt and opt not in unique_opts:
-                    unique_opts.append(opt)
-
             spacer = QLabel()
             spacer.setFixedWidth(130)
             row_layout.addWidget(spacer)
-            
             row_layout.addStretch(1)
             
-            # For the indented fields, we keep the mode text inline rather than breaking to a new line
             rich_label = f"{label_text} <span style='color: gray; font-size: 10px;'><i>({mode})</i></span>"
             label = QLabel(rich_label)
             row_layout.addWidget(label)
             
             combo = QComboBox()
             combo.setEditable(True)
-            combo.addItems(unique_opts)
-            combo.setMinimumWidth(120) 
-            row_layout.addWidget(combo)
+            combo.setMinimumWidth(150) # Made slightly wider to fit the descriptions
+            
+            # --- NEW: Attach our custom painter to the drop-down list ---
+            combo.setItemDelegate(DropdownDescriptionDelegate(combo))
+            
+            unique_opts = []
+            for opt in options:
+                # Check if the option is a tuple (Value, Description) or just a standard string
+                val = opt[0] if isinstance(opt, tuple) else opt
+                desc = opt[1] if isinstance(opt, tuple) else ""
+                
+                if val and val not in unique_opts:
+                    unique_opts.append(val)
+                    combo.addItem(val)
+                    
+                    # --- NEW: Secretly store the description in the item's UserRole memory ---
+                    if desc:
+                        combo.setItemData(combo.count() - 1, desc, Qt.ItemDataRole.UserRole)
             
             chk = QCheckBox()
             chk.setChecked(bool(unique_opts))
+            row_layout.addWidget(combo)
             row_layout.addWidget(chk)
             
             self.form_layout.addWidget(row_frame)
@@ -159,17 +201,34 @@ class MetadataReviewDialog(QDialog):
         vol = str(metadata.get('volume', '')).strip()
         iss = str(metadata.get('issue_number', '')).strip()
         
+        # Build the raw list of possibilities as Tuples (Value, Description)
         index_options = []
         if vol and iss and vol.isdigit() and iss.isdigit():
-            index_options.append(f"{vol}.{iss.zfill(2)}")
+            index_options.append( (f"{vol}.{iss.zfill(2)}", "") )
             
-        if iss: index_options.append(iss)
-        if vol: index_options.append(vol)
+        if iss: index_options.append( (iss, "") )
+        if vol: index_options.append( (vol, "") )
         if metadata.get('day_of_year'):
-            index_options.append(str(metadata.get('day_of_year')))
+            index_options.append( (str(metadata.get('day_of_year')), _("(Julian Date)")) )
+        if metadata.get('week_of_year'):
+            index_options.append( (str(metadata.get('week_of_year')), _("(Week №)")) )
+            
+        # Strict Decimal and Float Filter
+        filtered_index_options = []
+        for opt in index_options:
+            val = opt[0] # The numeric value we need to test
+            try:
+                float(val)
+                if '.' in val:
+                    if len(val.split('.')[-1]) <= 2:
+                        filtered_index_options.append(opt)
+                else:
+                    filtered_index_options.append(opt)
+            except ValueError:
+                pass
             
         add_indented_combo_field('series', _('Series:'), [series_val], _("Replaces"))
-        add_indented_combo_field('series_index', _('Series Index:'), index_options, _("Replaces"))
+        add_indented_combo_field('series_index', _('Series Index:'), filtered_index_options, _("Replaces"))
 
         tags_str = ", ".join(metadata.get('tags', [])) if isinstance(metadata.get('tags', []), list) else str(metadata.get('tags', ''))
         add_field("tags", _("Tags"), tags_str, _("Merges"))
