@@ -1,6 +1,6 @@
 # AI Vision Metadata
 
-**Version:** 1.1.0  
+**Version:** 1.1.1  
 **Author:** RelUnrelated (<dan@relunrelated.com>)  
 **License:** GNU General Public License v3.0 (GPLv3) — See the `LICENSE.md` file for details.  
 **Changelog:** See the `CHANGELOG.md` file for release history and updates.  
@@ -60,7 +60,7 @@ To use the cloud features of this plugin, you will need to generate an API key f
 
 **Google Gemini (Recommended for Free Tier)**
 * Navigate to [Google AI Studio](https://aistudio.google.com/app/apikey) to generate a free API key.
-* *Note on Limits:* `gemini-2.0-flash` offers generous free daily quotas. Using `gemini-2.5-pro` for complex covers and deep web searching is highly recommended, but it requires adding a billing profile to your Google Cloud account to lift strict rate limits.
+* *Note on Limits:* `gemini-2.0-flash-lite` offers generous free daily quotas. Using `gemini-2.5-pro` for complex covers and deep web searching is highly recommended, but it requires adding a billing profile to your Google Cloud account to lift strict rate limits.
 
 **OpenAI (ChatGPT)**
 * Navigate to the [OpenAI Platform](https://platform.openai.com/api-keys) to generate a key.
@@ -71,8 +71,8 @@ To use the cloud features of this plugin, you will need to generate an API key f
 * *Requirements:* Like OpenAI, Anthropic requires you to load prepaid credits to your account before API requests will be authorized (otherwise you will receive an immediate HTTP 400 error).
 
 **OpenRouter**
-* Navigate to the [OpenRouter Console](https://openrouter.ai/settings/keys) to generate a key.
-* *Requirements:* OpenRouter provides access to a large variety of models from over sixty providers. OpenRouter requires you to load prepaid credits to your account before API requests will be authorized. The list of models in the configuration window will contain all of those which support image input.
+* Navigate to the [OpenRouter Workspace](https://openrouter.ai/settings/keys) to generate a key.
+* *Requirements:* OpenRouter provides access to a large variety of models from over sixty providers. OpenRouter requires you to load prepaid credits to your account before executing API requests. The list of models in the configuration window will contain all of those which support image input. The model list is available even without an API key.
 
 **Local Models (Ollama / LM Studio)**
 * You can run vision-capable models (like `llava`) completely offline on your own hardware.

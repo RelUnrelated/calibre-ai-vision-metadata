@@ -781,6 +781,16 @@ class AIVisionAction(InterfaceAction):
                 return {}
 
             metadata = extract_json_dict(raw_text)
+
+            expected_keys = ["title", "creators", "publisher", "published", "series", "tags", "identifiers", "comments"]
+
+            # Create a list of the AI's keys, forced to lowercase
+            ai_keys = [str(k).lower() for k in metadata.keys()]
+
+            # Check if at least one expected key exists in the AI's response
+            if not any(key in ai_keys for key in expected_keys):
+                return {"error_msg": _(
+                    "The AI returned data, but failed to follow the requested schema. Your local model may be too small or lacks the logic to follow strict JSON formatting instructions.")}
             
             if not metadata:
                 return {"error_msg": _("Data Parsing Error: Could not extract valid JSON from AI output.\nRaw Output: {0}...").format(raw_text[:150])}
