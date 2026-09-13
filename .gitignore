@@ -9,6 +9,10 @@ __pycache__/
 *.zip
 *.tar.gz
 
+.idea/
+.vscode/
+.venv/
+
 # OS generated files
 .DS_Store
 Thumbs.db
