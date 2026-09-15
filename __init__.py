@@ -22,7 +22,7 @@ class AIVisionMetadataWrapper(InterfaceActionBase):
     description             = _('Automate publication metadata extraction from cover art. Supports cloud APIs and local offline models.')
     supported_platforms     = ['windows', 'osx', 'linux']
     author                  = 'RelUnrelated'
-    version                 = (1, 1, 1)
+    version                 = (1, 2, 0)
     minimum_calibre_version = (5, 0, 0)
 
     # THIS IS THE MAGIC STRING: 'folder_name.file_name:ClassName'
