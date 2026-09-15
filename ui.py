@@ -2,7 +2,7 @@
 # __copyright__ = '2026, RelUnrelated <dan@relunrelated.com>'
 from qt.core import (QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QFrame, 
                      QLineEdit, QComboBox, QCheckBox, QPushButton, QDialogButtonBox, 
-                     QTextEdit, QPixmap, Qt, QStyledItemDelegate, QPalette)
+                     QTextEdit, QPixmap, Qt, QStyledItemDelegate, QPalette, QDoubleValidator)
 
 import typing
 
@@ -136,6 +136,13 @@ class MetadataReviewDialog(QDialog):
             combo = QComboBox()
             combo.setEditable(True)
             combo.setMinimumWidth(150) # Made slightly wider to fit the descriptions
+
+            # --- NEW: Restrict series_index to floating point numbers ---
+            if key == 'series_index':
+                validator = QDoubleValidator(0.0, 999999.0, 2, combo)
+                validator.setNotation(QDoubleValidator.Notation.StandardNotation)
+                combo.setValidator(validator)
+            # ------------------------------------------------------------
             
             # --- NEW: Attach our custom painter to the drop-down list ---
             combo.setItemDelegate(DropdownDescriptionDelegate(combo))
