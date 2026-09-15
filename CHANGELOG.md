@@ -1,3 +1,13 @@
+## [1.2.0] - 2026-09-xx
+
+### Added:
+
+* Batch processing without manual review...
+
+### Fixed:
+
+* Limit series index to float with 2 decimal places, reflecting Calibre's internal format
+
 ## [1.1.1] - 2026-06-19
 
 ### Fixed:
