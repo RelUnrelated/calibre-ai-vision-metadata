@@ -1,13 +1,3 @@
-## [1.2.0] - 2026-09-xx
-
-### Added:
-
-* Added batch...
-
-### Fixed:
-
-* Restricted series index to float with two decimal places, reflecting the data structure in Calibre
-
 ## [1.1.1] - 2026-06-19
 
 ### Fixed:
