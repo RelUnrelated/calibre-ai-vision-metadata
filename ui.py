@@ -395,7 +395,7 @@ class BlindBatchDialog(QDialog):
             ("authors", _("Creators"), True, False),
             ("publisher", _("Publisher"), False, False),
             ("pubdate", _("Published Date"), False, False),
-            ("series", _("Series & Index"), False, False),
+            ("series", _("Series && Index"), False, False),
             ("tags", _("Tags"), True, True),
             ("identifiers", _("Identifiers"), True, True),
             ("comments", _("Comments"), True, True),
