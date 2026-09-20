@@ -46,7 +46,7 @@ DEFAULT_PROMPT = (
     "'volume' (string: the volume number ONLY, converted to standard Arabic numerals, e.g., '48' instead of 'XLVIII'), "
     "'issue_number' (string: the absolute issue number ONLY, converted to standard Arabic numerals. Do not include the volume.), "
     "'title' (string: format strictly as '[Publication Name], [Date], Volume [Vol], Issue [Num]'), "
-    "'creators' (list of strings: the main artists or authors. If this is a magazine, you MUST use Google Search to find the current Editor-in-Chief or Managing Editor for this date and list them here), "
+    "'creators' (list of strings: the main artists or authors or editors. If this is a magazine, you MUST use Google Search to find the current Editor-in-Chief or Managing Editor or Editor for this date and list them here), "
     "'pub_year' (integer: the specific year of this issue), "
     "'pub_month' (integer), 'pub_day' (integer), "
     "'publisher' (string: the publishing company or organization), "
@@ -437,47 +437,47 @@ class AIVisionAction(InterfaceAction):
     action_spec = ('AI Vision Metadata', 'images/icon.png', _('Identify book via AI Vision'), 'Ctrl+Shift+I')
 
     def genesis(self):
+        # --- NEW: State Trackers for Blind Batch ---
+        self.is_blind_batch = False
+        self.approved_batch_fields = {}
+        # -----------------------------------------
+
         self.signals = WorkerSignals()
         self.signals.review_signal.connect(self._show_review_dialog, type=Qt.ConnectionType.QueuedConnection)
-        
-        # --- Wire up the error signal using a QueuedConnection ---
         self.signals.error_signal.connect(self._show_error_dialog, type=Qt.ConnectionType.QueuedConnection)
-        # --------------------------------------------------------------
 
-        # 1. The Main Action (This still catches the direct toolbar click)
         self.qaction.triggered.connect(self.identify_book)
-        
-        # --- Dropdown Menu for Configuration & Context Menu ---
         self.menu = QMenu(self.gui)
-        
-        # 2. Add the primary action INTO the menu for right-click users
+
         self.run_action = self.create_action(
             spec=(_('Identify Cover'), 'images/icon.png', _('Run AI Vision Metadata on selected book'), None),
             attr='run_action'
         )
-
         self.run_action.triggered.connect(self.identify_book)
         self.menu.addAction(self.run_action)
-        
-        # Add a visual separator line
+
+        # --- NEW: Blind Batch Menu Action ---
+        self.batch_action = self.create_action(
+            spec=('Blind Batch Process', 'images/icon.png', 'Process selected books without review', None),
+            attr='batch_action'
+        )
+        self.batch_action.triggered.connect(self.start_blind_batch)
+        self.menu.addAction(self.batch_action)
+        # ------------------------------------
+
         self.menu.addSeparator()
-        
-        # 3. Add the configuration sub-action
+
         self.config_action = self.create_action(
             spec=('Configure AI Vision', 'images/config.png', 'Settings for AI Vision Metadata', None),
             attr='config_action'
         )
         self.config_action.triggered.connect(self.show_configuration)
         self.menu.addAction(self.config_action)
-        
+
         self.qaction.setMenu(self.menu)
-        # ------------------------------------------------------
-        
+
         try:
-            # Ask the resource manager to extract both images from the zip
             resources = self.load_resources(['images/icon.png', 'images/config.png'])
-            
-            # 1. Apply the main icon to the toolbar button and the "Identify Cover" menu item
             icon_data = resources.get('images/icon.png')
             if icon_data:
                 pixmap = QPixmap()
@@ -485,33 +485,46 @@ class AIVisionAction(InterfaceAction):
                 main_icon = QIcon(pixmap)
                 self.qaction.setIcon(main_icon)
                 self.run_action.setIcon(main_icon)
-                
-            # 2. Apply the custom config icon to the settings menu item
+                self.batch_action.setIcon(main_icon)
+
             config_data = resources.get('images/config.png')
             if config_data:
                 config_pixmap = QPixmap()
                 config_pixmap.loadFromData(config_data)
                 self.config_action.setIcon(QIcon(config_pixmap))
-                
-        except Exception as e:
-            # Fails silently if the images aren't found, falling back to default text/icons
+        except Exception:
             pass
 
-    def show_configuration(self):
-        # This native Calibre command instantly summons the ConfigWidget
-        self.interface_action_base_plugin.do_user_config(self.gui)
-
-    def identify_book(self):
+    def start_blind_batch(self):
         rows = self.gui.library_view.selectionModel().selectedRows()
         if not rows or len(rows) == 0:
             from calibre.gui2 import error_dialog
             return error_dialog(self.gui, _('No Selection'), _('Please select at least one book.'), show=True)
 
-        # Build the queue of Book IDs from the highlighted rows
+        from calibre_plugins.ai_vision_metadata.ui import BlindBatchDialog
+        d = BlindBatchDialog(self.gui)
+        if d.exec_() == d.Accepted:
+            self.is_blind_batch = True
+            self.approved_batch_fields = d.get_selected_fields()
+
+            self.batch_queue = [self.gui.library_view.model().id(row) for row in rows]
+            self.process_next_in_queue()
+        else:
+            self.is_blind_batch = False
+
+    def identify_book(self):
+        self.is_blind_batch = False  # Ensure standard mode resets the bypass flag
+        rows = self.gui.library_view.selectionModel().selectedRows()
+        if not rows or len(rows) == 0:
+            from calibre.gui2 import error_dialog
+            return error_dialog(self.gui, _('No Selection'), _('Please select at least one book.'), show=True)
+
         self.batch_queue = [self.gui.library_view.model().id(row) for row in rows]
-        
-        # Start the assembly line
         self.process_next_in_queue()
+
+    def show_configuration(self):
+        # This native Calibre command instantly summons the ConfigWidget
+        self.interface_action_base_plugin.do_user_config(self.gui)
 
     def process_next_in_queue(self):
         """Pops the next book from the queue and starts the AI job."""
@@ -862,16 +875,75 @@ class AIVisionAction(InterfaceAction):
     def job_finished(self, job):
         if job.failed:
             return self.gui.job_exception(job, dialog_title=_("AI Vision Failed"))
-            
+
         result = job.result
-        
+
         if "error_msg" in result:
             self.signals.error_signal.emit(result["error_msg"])
             return
         else:
             book_id, metadata, cover_path = job.result
-            self.signals.review_signal.emit(book_id, metadata, cover_path)
-            
+
+            # --- NEW: Intercept and Bypass the UI for Blind Batch ---
+            if getattr(self, 'is_blind_batch', False):
+                structured_data = {}
+
+                # 1. Transform AI raw data into Calibre formats
+                raw_creators = metadata.get('creators', metadata.get('author', metadata.get('editor', [])))
+                creators_str = ", ".join(raw_creators) if isinstance(raw_creators, list) else str(raw_creators)
+
+                year_raw = metadata.get('pub_year')
+                if year_raw and str(year_raw).strip().isdigit():
+                    year = str(year_raw).strip()
+                    month_raw = metadata.get('pub_month')
+                    month = str(month_raw).strip().zfill(2) if month_raw and str(month_raw).strip().isdigit() else "01"
+                    day_raw = metadata.get('pub_day')
+                    day = str(day_raw).strip().zfill(2) if day_raw and str(day_raw).strip().isdigit() else "01"
+                    pub_date = f"{year}-{month}-{day}"
+                else:
+                    pub_date = ""
+
+                vol = str(metadata.get('volume', '')).strip()
+                iss = str(metadata.get('issue_number', '')).strip()
+                series_index = ""
+                if vol and iss and vol.isdigit() and iss.isdigit():
+                    series_index = f"{vol}.{iss.zfill(2)}"
+                elif iss:
+                    series_index = iss
+                elif vol:
+                    series_index = vol
+
+                # Build a mapped dictionary mimicking the UI output
+                mapped_metadata = {
+                    'title': metadata.get('title', ''),
+                    'authors': creators_str,
+                    'publisher': metadata.get('publisher', ''),
+                    'pubdate': pub_date,
+                    'series': metadata.get('series', ''),
+                    'series_index': series_index,
+                    'tags': ", ".join(metadata.get('tags', [])) if isinstance(metadata.get('tags', []), list) else str(
+                        metadata.get('tags', '')),
+                    'identifiers': metadata.get('ids', ''),
+                    'comments': metadata.get('comments', ''),
+                    'languages': ", ".join(metadata.get('languages', ['eng'])) if isinstance(
+                        metadata.get('languages', ['eng']), list) else str(metadata.get('languages', 'eng'))
+                }
+
+                # 2. Filter by the fields the user checked in the warning dialog
+                for key, action in self.approved_batch_fields.items():
+                    val = mapped_metadata.get(key, "")
+                    if val:
+                        structured_data[key] = {'value': val, 'action': action}
+
+                    # Specifically handle the shared Series & Index checkbox
+                    if key == 'series' and mapped_metadata.get('series_index'):
+                        structured_data['series_index'] = {'value': mapped_metadata['series_index'], 'action': action}
+
+                self.apply_metadata(book_id, structured_data)
+                self.process_next_in_queue()
+            else:
+                self.signals.review_signal.emit(book_id, metadata, cover_path)
+
     def _show_review_dialog(self, book_id, metadata, cover_path):
         try:
             from calibre_plugins.ai_vision_metadata.ui import MetadataReviewDialog
@@ -906,91 +978,124 @@ class AIVisionAction(InterfaceAction):
     def apply_metadata(self, book_id, approved_data):
         db = self.gui.current_db.new_api
         mi = db.get_metadata(book_id)
-        
-        # 1. Set Languages First (Crucial for the title_sort algorithm)
-        if 'languages' in approved_data:
-            # Calibre expects lowercase 3-letter codes
-            langs = [l.strip().lower() for l in approved_data['languages'].split(',') if l.strip()]
-            if langs:
-                mi.languages = langs
 
-        # 2. Set Title and Title Sort (Passing the language we just extracted)
-        if 'title' in approved_data: 
-            mi.title = approved_data['title']
+        # --- Helper to cleanly extract value and action ---
+        def get_val_action(key):
+            if key in approved_data:
+                data = approved_data[key]
+                if isinstance(data, dict):
+                    return data.get('value'), data.get('action', 'overwrite')
+                else:
+                    return data, 'overwrite'  # Fallback for edge cases
+            return None, None
+
+        # 1. Languages
+        val, action = get_val_action('languages')
+        if val is not None:
+            new_langs = [l.strip().lower() for l in val.split(',') if l.strip()]
+            if new_langs:
+                if action == 'append' and mi.languages:
+                    # Append while maintaining uniqueness (preserves order)
+                    mi.languages = list(dict.fromkeys(mi.languages + new_langs))
+                else:
+                    mi.languages = new_langs
+
+        # 2. Title and Title Sort
+        val, action = get_val_action('title')
+        if val is not None:
+            # Title appending is rare, but allowed if strictly requested
+            if action == 'append' and mi.title:
+                mi.title = f"{mi.title} {val}"
+            else:
+                mi.title = val
+
             from calibre.ebooks.metadata import title_sort
-            # Safely grab the primary language code to feed the sort routine
             lang_code = mi.languages[0] if mi.languages else None
             mi.title_sort = title_sort(mi.title, lang=lang_code)
-            
-        if 'authors' in approved_data:
-            authors = [a.strip() for a in approved_data['authors'].split(',') if a.strip()]
-            if authors: 
-                mi.authors = authors
-                
-                # Import the standalone function from Calibre's metadata tools
+
+        # 3. Authors
+        val, action = get_val_action('authors')
+        if val is not None:
+            new_authors = [a.strip() for a in val.split(',') if a.strip()]
+            if new_authors:
+                if action == 'append' and mi.authors:
+                    existing = mi.authors
+                    for a in new_authors:
+                        if a not in existing:
+                            existing.append(a)
+                    mi.authors = existing
+                else:
+                    mi.authors = new_authors
+
                 from calibre.ebooks.metadata import authors_to_sort_string
                 mi.author_sort = authors_to_sort_string(mi.authors)
-                
-        if 'series' in approved_data: 
-            mi.series = approved_data['series']
-        if 'series_index' in approved_data:
-            try: mi.series_index = float(approved_data['series_index'])
-            except ValueError: pass
 
-        if 'publisher' in approved_data:
-            mi.publisher = approved_data['publisher']
-            
-        if 'pubdate' in approved_data:
+        # 4. Series
+        val, action = get_val_action('series')
+        if val is not None:
+            mi.series = val  # Overwrite only, appending series names corrupts indexing
+
+        # 5. Series Index
+        val, action = get_val_action('series_index')
+        if val is not None:
             try:
-                import datetime
-                mi.pubdate = datetime.datetime.strptime(approved_data['pubdate'], "%Y-%m-%d")
+                mi.series_index = float(val)
             except ValueError:
                 pass
 
-        if 'tags' in approved_data:
-            # Convert the comma-separated string from the UI into a clean list
-            new_tags = [t.strip() for t in approved_data['tags'].split(',') if t.strip()]
-            
-            # Fetch existing tags from Calibre (returns None if empty)
-            existing_tags = mi.tags if mi.tags else []
-            
-            # Append new tags only if they don't already exist in the book's metadata
-            for tag in new_tags:
-                if tag not in existing_tags:
-                    existing_tags.append(tag)
-                    
-            mi.tags = existing_tags
+        # 6. Publisher
+        val, action = get_val_action('publisher')
+        if val is not None:
+            if action == 'append' and mi.publisher:
+                mi.publisher = f"{mi.publisher}, {val}"
+            else:
+                mi.publisher = val
 
-        # --- 2. Identifiers (Merge Dictionaries) ---
-        if 'identifiers' in approved_data:
-            new_ids_str = approved_data['identifiers']
-            
-            # Calibre stores identifiers as a dictionary (e.g., {'isbn': '1234', 'issn': '5678'})
-            existing_ids = mi.identifiers if mi.identifiers else {}
-            
-            # Parse the AI's comma-separated string and inject it into the dictionary
-            for pair in new_ids_str.split(','):
+        # 7. Pubdate
+        val, action = get_val_action('pubdate')
+        if val is not None:
+            try:
+                import datetime
+                mi.pubdate = datetime.datetime.strptime(val, "%Y-%m-%d")
+            except ValueError:
+                pass
+
+        # 8. Tags
+        val, action = get_val_action('tags')
+        if val is not None:
+            new_tags = [t.strip() for t in val.split(',') if t.strip()]
+            existing_tags = mi.tags if mi.tags else []
+
+            if action == 'append':
+                for tag in new_tags:
+                    if tag not in existing_tags:
+                        existing_tags.append(tag)
+                mi.tags = existing_tags
+            else:
+                mi.tags = new_tags
+
+        # 9. Identifiers (Dictionary Logic)
+        val, action = get_val_action('identifiers')
+        if val is not None:
+            existing_ids = mi.identifiers if (action == 'append' and mi.identifiers) else {}
+
+            for pair in val.split(','):
                 if ':' in pair:
-                    key, val = pair.split(':', 1)
-                    # This updates existing keys or adds new ones without destroying the rest
-                    existing_ids[key.strip().lower()] = val.strip()
-            
+                    k, v = pair.split(':', 1)
+                    existing_ids[k.strip().lower()] = v.strip()
+
             mi.identifiers = existing_ids
 
-        # --- 3. Comments (Append Text) ---
-        if 'comments' in approved_data:
-            new_comments = approved_data['comments']
+        # 10. Comments (HTML Formatting)
+        val, action = get_val_action('comments')
+        if val is not None:
             existing_comments = mi.comments if mi.comments else ""
-            
-            # If there is already text in the comments field, add a line break first
-            if existing_comments.strip():
-                # Using HTML breaks so it renders cleanly in Calibre's book details pane
-                mi.comments = f"{existing_comments}<br><br><b>AI Summary:</b><br>{new_comments}"
+
+            if action == 'append' and existing_comments.strip():
+                mi.comments = f"{existing_comments}<br><br><b>AI Summary:</b><br>{val}"
             else:
-                mi.comments = new_comments
-                
-        # --- 4. Pass the metadata to Calibre's new_api cache ---
+                mi.comments = val
+
+        # --- Finalize Data and Force Calibre Refresh ---
         db.set_metadata(book_id, mi)
-        
-        # --- 5. Force the UI to redraw ---
         self.gui.library_view.model().refresh_ids([book_id])

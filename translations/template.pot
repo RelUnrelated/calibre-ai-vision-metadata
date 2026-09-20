@@ -1,0 +1,339 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: PACKAGE VERSION\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-09-20 15:13-0500\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: __init__.py:22
+msgid ""
+"Automate publication metadata extraction from cover art. Supports cloud APIs "
+"and local offline models."
+msgstr ""
+
+#: main.py:67
+msgid "AI Provider:"
+msgstr ""
+
+#: main.py:86
+msgid "API Key:"
+msgstr ""
+
+#: main.py:110
+msgid "Local Base URL (e.g., http://localhost:11434):"
+msgstr ""
+
+#: main.py:117
+msgid "Model Name:"
+msgstr ""
+
+#: main.py:162
+msgid "Fetch Available Models"
+msgstr ""
+
+#: main.py:169
+msgid "Network Timeout (seconds):"
+msgstr ""
+
+#: main.py:179
+msgid "System Prompt (Advanced):"
+msgstr ""
+
+#: main.py:181 main.py:393
+msgid "Restore Default"
+msgstr ""
+
+#: main.py:251
+msgid "Get Local Tools:"
+msgstr ""
+
+#: main.py:263
+msgid "Get Google API Key"
+msgstr ""
+
+#: main.py:268
+msgid "Get OpenAI API Key"
+msgstr ""
+
+#: main.py:273
+msgid "Get Anthropic API Key"
+msgstr ""
+
+#: main.py:278
+msgid "Get OpenRouter API Key"
+msgstr ""
+
+#: main.py:306
+msgid "Missing Key"
+msgstr ""
+
+#: main.py:306
+#, python-brace-format
+msgid "Please enter your API key for {0}."
+msgstr ""
+
+#: main.py:310
+msgid "Missing URL"
+msgstr ""
+
+#: main.py:310
+msgid "Please enter your local server's Base URL."
+msgstr ""
+
+#: main.py:387
+msgid "Success"
+msgstr ""
+
+#: main.py:387
+msgid "Models refreshed successfully!"
+msgstr ""
+
+#: main.py:390
+msgid "Error"
+msgstr ""
+
+#: main.py:390
+#, python-brace-format
+msgid "Failed to fetch models: {0}"
+msgstr ""
+
+#: main.py:394
+msgid ""
+"Are you sure you want to overwrite your custom prompt with the default "
+"instructions?"
+msgstr ""
+
+#: main.py:437
+msgid "Identify book via AI Vision"
+msgstr ""
+
+#: main.py:453
+msgid "Identify Cover"
+msgstr ""
+
+#: main.py:453
+msgid "Run AI Vision Metadata on selected book"
+msgstr ""
+
+#: main.py:502 main.py:520
+msgid "No Selection"
+msgstr ""
+
+#: main.py:502 main.py:520
+msgid "Please select at least one book."
+msgstr ""
+
+#: main.py:549
+#, python-brace-format
+msgid "Book ID {0} has no cover image to process. Skipping to next."
+msgstr ""
+
+#: main.py:557
+#, python-brace-format
+msgid "Analyzing cover for book ID: {0}"
+msgstr ""
+
+#: main.py:686
+msgid "Unknown AI Provider selected."
+msgstr ""
+
+#: main.py:730
+#, python-brace-format
+msgid "{0} API Error ({1}): {2}"
+msgstr ""
+
+#: main.py:735
+#, python-brace-format
+msgid "{0} API Error (HTTP {1}): {2}"
+msgstr ""
+
+#: main.py:738
+msgid ""
+"The AI took too long to analyze the cover and search the web. Please try "
+"again."
+msgstr ""
+
+#: main.py:740
+#, python-brace-format
+msgid "Network connection failed: {0}"
+msgstr ""
+
+#: main.py:742
+#, python-brace-format
+msgid "An unexpected error occurred: {0}"
+msgstr ""
+
+#: main.py:746
+#, python-brace-format
+msgid "API Error: {0} server was unavailable after multiple retries."
+msgstr ""
+
+#: main.py:754
+msgid "The AI blocked this cover due to its safety filters."
+msgstr ""
+
+#: main.py:770
+msgid ""
+"The AI returned an empty response. The model may have failed to process the "
+"image."
+msgstr ""
+
+#: main.py:806
+msgid ""
+"The AI returned data, but failed to follow the requested schema. Your local "
+"model may be too small or lacks the logic to follow strict JSON formatting "
+"instructions."
+msgstr ""
+
+#: main.py:809
+#, python-brace-format
+msgid ""
+"Data Parsing Error: Could not extract valid JSON from AI output.\n"
+"Raw Output: {0}..."
+msgstr ""
+
+#: main.py:873
+#, python-brace-format
+msgid "Data Parsing Error: {0}"
+msgstr ""
+
+#: main.py:877
+msgid "AI Vision Failed"
+msgstr ""
+
+#: main.py:966
+msgid "UI Error"
+msgstr ""
+
+#: main.py:966
+#, python-brace-format
+msgid "Could not launch review: {0}"
+msgstr ""
+
+#: main.py:976
+msgid "AI Vision Error"
+msgstr ""
+
+#: ui.py:46
+msgid "Review AI Metadata"
+msgstr ""
+
+#: ui.py:54
+msgid "Unknown Model"
+msgstr ""
+
+#: ui.py:55
+msgid "AI"
+msgstr ""
+
+#: ui.py:59
+#, python-brace-format
+msgid ""
+"<center><b>{0} : {1}</b><br><span style='color: gray; font-size: "
+"10px;'><i>(Processed in {2} seconds)</i></span></center>"
+msgstr ""
+
+#: ui.py:116 ui.py:151 ui.py:210 ui.py:415
+msgid "Overwrite"
+msgstr ""
+
+#: ui.py:116 ui.py:118 ui.py:151 ui.py:153 ui.py:210 ui.py:212
+msgid "Append"
+msgstr ""
+
+#: ui.py:236 ui.py:394
+msgid "Title"
+msgstr ""
+
+#: ui.py:250 ui.py:395
+msgid "Creators"
+msgstr ""
+
+#: ui.py:263
+msgid "(Julian Date)"
+msgstr ""
+
+#: ui.py:265
+msgid "(Week №)"
+msgstr ""
+
+#: ui.py:280
+msgid "Series:"
+msgstr ""
+
+#: ui.py:281
+msgid "Index:"
+msgstr ""
+
+#: ui.py:285 ui.py:399
+msgid "Tags"
+msgstr ""
+
+#: ui.py:290 ui.py:402
+msgid "Languages"
+msgstr ""
+
+#: ui.py:292 ui.py:396
+msgid "Publisher"
+msgstr ""
+
+#: ui.py:305
+msgid "Published"
+msgstr ""
+
+#: ui.py:306 ui.py:400
+msgid "Identifiers"
+msgstr ""
+
+#: ui.py:308 ui.py:401
+msgid "Comments"
+msgstr ""
+
+#: ui.py:319
+msgid ""
+"<i><b>Note:</b> The metadata above was generated by an AI model and may "
+"contain errors or inaccuracies. Please review each field carefully. Use the "
+"dropdowns to control whether data is overwritten or merged.</i>"
+msgstr ""
+
+#: ui.py:367
+msgid "WARNING: Blind Batch Processing"
+msgstr ""
+
+#: ui.py:375
+msgid ""
+"<h3 style='color: red; text-align: center;'>DANGER: Irreversible Action</"
+"h3><p>You are about to process multiple books simultaneously <b>without</b> "
+"reviewing the AI's output.</p><p>If the AI hallucinates, it will permanently "
+"overwrite your existing Calibre metadata for the selected fields.</"
+"p><p>Select the fields you wish to blindly apply, and choose how the data "
+"should be handled:</p>"
+msgstr ""
+
+#: ui.py:397
+msgid "Published Date"
+msgstr ""
+
+#: ui.py:398
+msgid "Series & Index"
+msgstr ""
+
+#: ui.py:415 ui.py:417
+msgid "Append / Merge"
+msgstr ""
+
+#: ui.py:436
+msgid "I Trust It - Start Batch"
+msgstr ""

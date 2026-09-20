@@ -101,129 +101,172 @@ class MetadataReviewDialog(QDialog):
             row_layout.setContentsMargins(5, 5, 5, 5)
             return row_frame, row_layout
 
-        def add_field(key, label_text, value, mode):
+        def add_field(key, label_text, value, allow_append=False, default_to_append=False):
             row_frame, row_layout = create_row_container()
-            
-            # Injecting a muted, italicized sub-label
-            rich_label = f"{label_text}<br><span style='color: gray; font-size: 10px;'><i>({mode})</i></span>"
-            label = QLabel(rich_label)
-            label.setFixedWidth(130)
+
+            # 1. The main label
+            label = QLabel(f"<b>{label_text}</b>")
+            label.setFixedWidth(80)
             row_layout.addWidget(label)
-            
+
+            # 2. The dynamic action dropdown or static label
+            action_combo = None
+            if allow_append:
+                action_combo = QComboBox()
+                action_combo.addItems([_("Overwrite"), _("Append")])
+                if default_to_append:
+                    action_combo.setCurrentText(_("Append"))
+                action_combo.setFixedWidth(90)
+                row_layout.addWidget(action_combo)
+            else:
+                static_label = QLabel("<span style='color: gray; font-size: 10px;'><i>(Overwrite)</i></span>")
+                static_label.setFixedWidth(90)
+                row_layout.addWidget(static_label)
+
+            # 3. The text input
             edit = QLineEdit(str(value) if value else "")
-            row_layout.addWidget(edit, 1) 
-            
+            row_layout.addWidget(edit, 1)
+
+            # 4. The checkbox
             chk = QCheckBox()
             has_data = bool(str(value).strip() if value else False)
             chk.setChecked(has_data)
             row_layout.addWidget(chk)
-            
-            self.form_layout.addWidget(row_frame)
-            self.results[key] = {'checkbox': chk, 'widget': edit}
 
-        def add_indented_combo_field(key, label_text, options, mode):
+            self.form_layout.addWidget(row_frame)
+            self.results[key] = {'checkbox': chk, 'widget': edit, 'action_combo': action_combo}
+
+        def add_indented_combo_field(key, label_text, options, allow_append=False, default_to_append=False):
             row_frame, row_layout = create_row_container()
-            
+
+            # 1. Spacer to align the action column properly
             spacer = QLabel()
-            spacer.setFixedWidth(130)
+            spacer.setFixedWidth(80)
             row_layout.addWidget(spacer)
-            row_layout.addStretch(1)
-            
-            rich_label = f"{label_text} <span style='color: gray; font-size: 10px;'><i>({mode})</i></span>"
-            label = QLabel(rich_label)
+
+            # 2. The dynamic action dropdown or static label
+            action_combo = None
+            if allow_append:
+                action_combo = QComboBox()
+                action_combo.addItems([_("Overwrite"), _("Append")])
+                if default_to_append:
+                    action_combo.setCurrentText(_("Append"))
+                action_combo.setFixedWidth(90)
+                row_layout.addWidget(action_combo)
+            else:
+                static_label = QLabel("<span style='color: gray; font-size: 10px;'><i>(Overwrite)</i></span>")
+                static_label.setFixedWidth(90)
+                row_layout.addWidget(static_label)
+
+            # 3. Indented label
+            label = QLabel(f"<b>{label_text}</b>")
             row_layout.addWidget(label)
-            
+
+            # 4. Combo input
             combo = QComboBox()
             combo.setEditable(True)
-            combo.setMinimumWidth(150) # Made slightly wider to fit the descriptions
+            combo.setMinimumWidth(150)
 
-            # --- NEW: Restrict series_index to floating point numbers ---
             if key == 'series_index':
                 validator = QDoubleValidator(0.0, 999999.0, 2, combo)
                 validator.setNotation(QDoubleValidator.Notation.StandardNotation)
                 combo.setValidator(validator)
-            # ------------------------------------------------------------
-            
-            # --- NEW: Attach our custom painter to the drop-down list ---
+
             combo.setItemDelegate(DropdownDescriptionDelegate(combo))
-            
+
             unique_opts = []
             for opt in options:
-                # Check if the option is a tuple (Value, Description) or just a standard string
                 val = opt[0] if isinstance(opt, tuple) else opt
                 desc = opt[1] if isinstance(opt, tuple) else ""
-                
+
                 if val and val not in unique_opts:
                     unique_opts.append(val)
                     combo.addItem(val)
-                    
-                    # --- NEW: Secretly store the description in the item's UserRole memory ---
+
                     if desc:
                         combo.setItemData(combo.count() - 1, desc, Qt.ItemDataRole.UserRole)
-            
+
+            # 5. Checkbox
             chk = QCheckBox()
             chk.setChecked(bool(unique_opts))
-            row_layout.addWidget(combo)
+            row_layout.addWidget(combo, 1)  # Added stretch factor
             row_layout.addWidget(chk)
-            
-            self.form_layout.addWidget(row_frame)
-            self.results[key] = {'checkbox': chk, 'widget': combo}
 
-        def add_text_area(key, label_text, value, mode):
+            self.form_layout.addWidget(row_frame)
+            self.results[key] = {'checkbox': chk, 'widget': combo, 'action_combo': action_combo}
+
+        def add_text_area(key, label_text, value, allow_append=False, default_to_append=False):
             row_frame, row_layout = create_row_container()
-            
-            rich_label = f"{label_text}<br><span style='color: gray; font-size: 10px;'><i>({mode})</i></span>"
-            label = QLabel(rich_label)
-            label.setFixedWidth(130)
+
+            # 1. The main label
+            label = QLabel(f"<b>{label_text}</b>")
+            label.setFixedWidth(80)
             row_layout.addWidget(label, alignment=Qt.AlignmentFlag.AlignTop)
-            
+
+            # 2. The dynamic action dropdown or static label
+            action_combo = None
+            if allow_append:
+                action_combo = QComboBox()
+                action_combo.addItems([_("Overwrite"), _("Append")])
+                if default_to_append:
+                    action_combo.setCurrentText(_("Append"))
+                action_combo.setFixedWidth(90)
+                row_layout.addWidget(action_combo, alignment=Qt.AlignmentFlag.AlignTop)
+            else:
+                static_label = QLabel("<span style='color: gray; font-size: 10px;'><i>(Overwrite)</i></span>")
+                static_label.setFixedWidth(90)
+                row_layout.addWidget(static_label, alignment=Qt.AlignmentFlag.AlignTop)
+
+            # 3. Text area
             edit = QTextEdit()
             edit.setPlainText(str(value) if value else "")
-            edit.setMaximumHeight(80) 
+            edit.setMaximumHeight(80)
             row_layout.addWidget(edit, 1)
-            
+
+            # 4. Checkbox
             chk = QCheckBox(self)
             has_data = bool(str(value).strip() if value else False)
             chk.setChecked(has_data)
             row_layout.addWidget(chk, alignment=Qt.AlignmentFlag.AlignTop)
-            
+
             self.form_layout.addWidget(row_frame)
-            self.results[key] = {'checkbox': chk, 'widget': edit}
+            self.results[key] = {'checkbox': chk, 'widget': edit, 'action_combo': action_combo}
 
         # --- BUILD THE FORM ---
-        add_field("title", _("Title"), metadata.get('title', ''), _("Replaces"))
-        
+        add_field("title", _("Title"), metadata.get('title', ''), allow_append=False)
+
         raw_creators = metadata.get('creators')
         if not raw_creators:
             rogue_editor = metadata.get('editor')
             rogue_author = metadata.get('author')
-            if rogue_editor: raw_creators = [rogue_editor]
-            elif rogue_author: raw_creators = [rogue_author]
-            else: raw_creators = []
-        
+            if rogue_editor:
+                raw_creators = [rogue_editor]
+            elif rogue_author:
+                raw_creators = [rogue_author]
+            else:
+                raw_creators = []
+
         creators_str = ", ".join(raw_creators) if isinstance(raw_creators, list) else str(raw_creators)
-        add_field("authors", _("Creators"), creators_str, _("Replaces"))
+        add_field("authors", _("Creators"), creators_str, allow_append=True, default_to_append=False)
 
         series_val = str(metadata.get('series', '')).strip()
         vol = str(metadata.get('volume', '')).strip()
         iss = str(metadata.get('issue_number', '')).strip()
-        
-        # Build the raw list of possibilities as Tuples (Value, Description)
+
         index_options = []
         if vol and iss and vol.isdigit() and iss.isdigit():
-            index_options.append( (f"{vol}.{iss.zfill(2)}", "") )
-            
-        if iss: index_options.append( (iss, "") )
-        if vol: index_options.append( (vol, "") )
+            index_options.append((f"{vol}.{iss.zfill(2)}", ""))
+
+        if iss: index_options.append((iss, ""))
+        if vol: index_options.append((vol, ""))
         if metadata.get('day_of_year'):
-            index_options.append( (str(metadata.get('day_of_year')), _("(Julian Date)")) )
+            index_options.append((str(metadata.get('day_of_year')), _("(Julian Date)")))
         if metadata.get('week_of_year'):
-            index_options.append( (str(metadata.get('week_of_year')), _("(Week №)")) )
-            
-        # Strict Decimal and Float Filter
+            index_options.append((str(metadata.get('week_of_year')), _("(Week №)")))
+
         filtered_index_options = []
         for opt in index_options:
-            val = opt[0] # The numeric value we need to test
+            val = opt[0]
             try:
                 float(val)
                 if '.' in val:
@@ -233,17 +276,20 @@ class MetadataReviewDialog(QDialog):
                     filtered_index_options.append(opt)
             except ValueError:
                 pass
-            
-        add_indented_combo_field('series', _('Series:'), [series_val], _("Replaces"))
-        add_indented_combo_field('series_index', _('Series Index:'), filtered_index_options, _("Replaces"))
 
-        tags_str = ", ".join(metadata.get('tags', [])) if isinstance(metadata.get('tags', []), list) else str(metadata.get('tags', ''))
-        add_field("tags", _("Tags"), tags_str, _("Merges"))
+        add_indented_combo_field('series', _('Series:'), [series_val], allow_append=False)
+        add_indented_combo_field('series_index', _('Index:'), filtered_index_options, allow_append=False)
 
-        langs_str = ", ".join(metadata.get('languages', ['eng'])) if isinstance(metadata.get('languages', ['eng']), list) else str(metadata.get('languages', 'eng'))
-        add_field("languages", _("Languages"), langs_str, _("Replaces"))
+        tags_str = ", ".join(metadata.get('tags', [])) if isinstance(metadata.get('tags', []), list) else str(
+            metadata.get('tags', ''))
+        add_field("tags", _("Tags"), tags_str, allow_append=True, default_to_append=True)
 
-        add_field("publisher", _("Publisher"), metadata.get('publisher', ''), _("Replaces"))
+        langs_str = ", ".join(metadata.get('languages', ['eng'])) if isinstance(metadata.get('languages', ['eng']),
+                                                                                list) else str(
+            metadata.get('languages', 'eng'))
+        add_field("languages", _("Languages"), langs_str, allow_append=True, default_to_append=False)
+
+        add_field("publisher", _("Publisher"), metadata.get('publisher', ''), allow_append=False)
 
         year_raw = metadata.get('pub_year')
         if year_raw and str(year_raw).strip().isdigit():
@@ -255,34 +301,34 @@ class MetadataReviewDialog(QDialog):
             pub_date = f"{year}-{month}-{day}"
         else:
             pub_date = ""
-            
-        add_field("pubdate", _("Published"), pub_date, _("Replaces"))
-        add_field("identifiers", _("Identifiers"), metadata.get('ids', ''), _("Merges")) # IDs use the merge logic!
-        add_text_area("comments", _("Comments"), metadata.get('comments', ''), _("Appends")) # Comments stack via HTML break
+
+        add_field("pubdate", _("Published"), pub_date, allow_append=False)
+        add_field("identifiers", _("Identifiers"), metadata.get('ids', ''), allow_append=True,
+                  default_to_append=True)
+        add_text_area("comments", _("Comments"), metadata.get('comments', ''), allow_append=True,
+                      default_to_append=True)
 
         self.form_layout.addStretch(1)
 
         # Add the completed form to the right side of the middle layout
         self.middle_layout.addLayout(self.form_layout)
-        
-        # Add the entire middle layout to the main window
         self.layout.addLayout(self.middle_layout)
 
-        # --- AI Disclaimer & Buttons (Spans the full width at the bottom) ---
+        # --- AI Disclaimer & Buttons ---
         disclaimer_text = _(
             "<i><b>Note:</b> The metadata above was generated by an AI model and may contain errors or inaccuracies. "
-            "Please review each field carefully. Use the checkboxes to strictly control whether "
-            "this new data should overwrite or be appended to your existing Calibre library data.</i>"
+            "Please review each field carefully. Use the dropdowns to control whether data is overwritten or merged.</i>"
         )
         self.disclaimer_label = QLabel(disclaimer_text)
         self.disclaimer_label.setWordWrap(True)
         font = self.disclaimer_label.font()
         font.setPointSize(max(8, font.pointSize() - 1))
         self.disclaimer_label.setFont(font)
-        self.disclaimer_label.setContentsMargins(0, 10, 0, 10) 
+        self.disclaimer_label.setContentsMargins(0, 10, 0, 10)
         self.layout.addWidget(self.disclaimer_label)
 
-        self.button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        self.button_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         self.button_box.accepted.connect(self.accept)
         self.button_box.rejected.connect(self.reject)
         self.layout.addWidget(self.button_box)
@@ -292,12 +338,116 @@ class MetadataReviewDialog(QDialog):
         for key, data in self.results.items():
             chk = data['checkbox']
             widget = data['widget']
-            
+            action_combo = data.get('action_combo')
+
             if chk.isChecked():
+                # 1. Extract the raw text value
                 if isinstance(widget, QComboBox):
-                    approved[key] = widget.currentText().strip()
+                    val = widget.currentText().strip()
                 elif isinstance(widget, QTextEdit):
-                    approved[key] = widget.toPlainText().strip()
+                    val = widget.toPlainText().strip()
                 else:
-                    approved[key] = widget.text().strip()
+                    val = widget.text().strip()
+
+                # 2. Extract the user's chosen action
+                if action_combo:
+                    action = "append" if "Append" in action_combo.currentText() else "overwrite"
+                else:
+                    action = "overwrite"
+
+                # 3. Package as a nested dictionary
+                approved[key] = {'value': val, 'action': action}
+
         return approved
+
+
+class BlindBatchDialog(QDialog):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setWindowTitle(_("WARNING: Blind Batch Processing"))
+        self.setMinimumWidth(450)
+        self.setMinimumHeight(520)
+
+        self.layout = QVBoxLayout(self)
+
+        # --- 1. The Warning Label ---
+        warning_text = _(
+            "<h3 style='color: red; text-align: center;'>DANGER: Irreversible Action</h3>"
+            "<p>You are about to process multiple books simultaneously <b>without</b> reviewing the AI's output.</p>"
+            "<p>If the AI hallucinates, it will permanently overwrite your existing Calibre metadata for the selected fields.</p>"
+            "<p>Select the fields you wish to blindly apply, and choose how the data should be handled:</p>"
+        )
+        self.warning_label = QLabel(warning_text)
+        self.warning_label.setWordWrap(True)
+        self.layout.addWidget(self.warning_label)
+
+        self.line1 = QFrame()
+        self.line1.setFrameShape(QFrame.Shape.HLine)
+        self.line1.setFrameShadow(QFrame.Shadow.Sunken)
+        self.layout.addWidget(self.line1)
+
+        # --- 2. The Checkboxes & Action Dropdowns ---
+        self.fields_data = {}
+
+        # Tuple format: (key, label, allows_append, default_to_append)
+        fields_to_batch = [
+            ("title", _("Title"), False, False),
+            ("authors", _("Creators"), True, False),
+            ("publisher", _("Publisher"), False, False),
+            ("pubdate", _("Published Date"), False, False),
+            ("series", _("Series & Index"), False, False),
+            ("tags", _("Tags"), True, True),
+            ("identifiers", _("Identifiers"), True, True),
+            ("comments", _("Comments"), True, True),
+            ("languages", _("Languages"), True, False)
+        ]
+
+        for key, label_text, allows_append, default_to_append in fields_to_batch:
+            row_layout = QHBoxLayout()
+
+            chk = QCheckBox(label_text)
+            chk.setChecked(False)  # Max safety: default OFF
+            row_layout.addWidget(chk, 1)
+
+            combo = None
+            if allows_append:
+                combo = QComboBox()
+                combo.addItems([_("Overwrite"), _("Append / Merge")])
+                if default_to_append:
+                    combo.setCurrentText(_("Append / Merge"))
+                combo.setFixedWidth(130)
+                row_layout.addWidget(combo)
+            else:
+                static_label = QLabel("<span style='color: gray; font-size: 10px;'><i>(Overwrite Only)</i></span>")
+                static_label.setFixedWidth(130)
+                static_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                row_layout.addWidget(static_label)
+
+            self.layout.addLayout(row_layout)
+            self.fields_data[key] = {'checkbox': chk, 'combo': combo}
+
+        self.line2 = QFrame()
+        self.line2.setFrameShape(QFrame.Shape.HLine)
+        self.line2.setFrameShadow(QFrame.Shadow.Sunken)
+        self.layout.addWidget(self.line2)
+
+        # --- 3. The Custom Button Box ---
+        self.button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
+        self.accept_btn = QPushButton(_("I Trust It - Start Batch"))
+        self.accept_btn.setStyleSheet("color: red; font-weight: bold;")
+        self.button_box.addButton(self.accept_btn, QDialogButtonBox.ButtonRole.AcceptRole)
+        self.button_box.accepted.connect(self.accept)
+        self.button_box.rejected.connect(self.reject)
+        self.layout.addWidget(self.button_box)
+
+    def get_selected_fields(self):
+        """Returns a dictionary mapping checked keys to their chosen action."""
+        approved_fields = {}
+        for key, data in self.fields_data.items():
+            if data['checkbox'].isChecked():
+                if data['combo']:
+                    action = "append" if "Append" in data['combo'].currentText() else "overwrite"
+                    approved_fields[key] = action
+                else:
+                    approved_fields[key] = "overwrite"
+        return approved_fields

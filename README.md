@@ -1,6 +1,6 @@
 # AI Vision Metadata
 
-**Version:** 1.1.1  
+**Version:** 1.2.0  
 **Author:** RelUnrelated (<dan@relunrelated.com>)  
 **License:** GNU General Public License v3.0 (GPLv3) — See the `LICENSE.md` file for details.  
 **Changelog:** See the `CHANGELOG.md` file for release history and updates.  
@@ -16,6 +16,7 @@ Originally built around Google's Gemini API, the plugin has evolved into a robus
 
 * **Multi-Provider Routing:** Seamlessly switch between cloud-based AI models (Google Gemini, OpenAI, Anthropic, OpenRouter) or route requests to your own local, offline models using Ollama or LM Studio.
 * **Sequential Batch Processing:** Select multiple publications at once. The plugin intelligently queues the requests in the background, preventing rate-limit bans and UI lockups.
+* **Blind Batch Bypass:** Power users can process dozens of books automatically without manual review, using a dedicated safety dialog to map specific fields for background application.
 * **Side-by-Side Review GUI:** Never fly blind. The plugin presents a crisp, scaled thumbnail of the cover image right next to the extracted metadata, allowing you to easily verify the AI's accuracy.
 * **Isolated Memory Banks:** The configuration menu securely remembers your distinct API keys, model selections, and custom system prompts for every individual provider.
 * **Advanced Prompt Tuning:** Directly edit the AI's core instructions to fine-tune extraction behavior for the unique quirks of your specific collection.
@@ -24,11 +25,11 @@ Originally built around Google's Gemini API, the plugin has evolved into a robus
 ## Installation
 Since this is a custom plugin, it must be installed manually through Calibre's interface.
 
-1. Download the release archive. Inside, you will find the `ai_vision_metadata.zip` plugin file. *(Do not unzip this plugin file).*
+1. Download the release archive. Inside, you will find the `AI_Vision_Metadata_v1.2.0.zip` plugin file. *(Do not unzip this plugin file)*.
 2. Open Calibre and click on **Preferences** (the gear icon) in the top toolbar.
 3. Under the "Advanced" section, click on **Plugins**.
 4. Click the **Load plugin from file** button in the bottom right corner.
-5. Navigate to and select the `ai_vision_metadata.zip` file.
+5. Navigate to and select the `AI_Vision_Metadata_v1.2.0.zip` file.
 6. Click **Yes** to accept the security warning and install the plugin.
 7. Restart Calibre for the changes to take effect.
 
@@ -45,11 +46,11 @@ Before using the tool, you must configure it with an API key or a local server a
 ## Usage
 Once configured, the plugin integrates seamlessly into your standard Calibre workflow.
 
-1. **Select Publications:** Highlight one or more entries in your Calibre library that have cover images. *(Batch processing is fully supported).*
-2. **Trigger the Plugin:** Click the AI Vision Metadata button in your main toolbar, or right-click the highlighted books and select it from the context menu. 
+1. **Select Publications:** Highlight one or more entries in your Calibre library that have cover images. *(Batch processing is fully supported)*.
+2. **Trigger the Plugin:** Click the AI Vision Metadata button in your main toolbar, or right-click the highlighted books and select it from the context menu. To bypass human review entirely, use the dropdown menu to select **Blind Batch Process**.
 3. **Wait for Processing:** The plugin runs in a safe background thread. It will analyze the first image and compile the data.
-4. **Review the Data:** A "Review AI Metadata" window will appear, featuring the cover image on the left and the extracted data on the right. 
-   * **Action Indicators:** Every field includes a muted sub-label (e.g., *Replaces*, *Merges*, *Appends*) so you know exactly whether checking the box will overwrite your existing Calibre data or safely add to it.
+4. **Review the Data:** For standard operations, a "Review AI Metadata" window will appear, featuring the cover image on the left and the extracted data on the right. 
+   * **Action Dropdowns:** Fields that support stacking (like Tags, Creators, and Comments) feature explicit **Overwrite / Append** dropdowns. You control exactly how new AI data interacts with your existing Calibre database.
    * **Checkboxes:** Use the checkboxes to select exactly which fields you want to import. Unchecked fields will be ignored, preserving your existing Calibre database entries.
    * **Editable Dropdowns:** Fields like *Series Index* offer auto-generated formats, but you can manually type directly into the box for edge cases.
 5. **Apply & Auto-Advance:** Click **OK** to save the checked metadata directly to Calibre. If you selected multiple books, the plugin will seamlessly load the next cover in your queue and begin processing it immediately.
