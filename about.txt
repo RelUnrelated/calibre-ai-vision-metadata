@@ -1,1 +1,1 @@
-Automate publication metadata extraction from cover art. A multi-agent AI tool supporting batch-processing via Google, OpenAI, Anthropic, or local offline models.
+漫元 MetaManga：从漫画文件名和现有元数据提取、翻译并整理书籍元数据，支持 Google、OpenAI、Anthropic 和本地模型。

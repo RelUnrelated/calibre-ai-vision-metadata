@@ -1,19 +1,20 @@
 # __license__   = 'GPL v3'
 # __copyright__ = '2026, RelUnrelated <dan@relunrelated.com>'
-import base64
 import json
 import urllib.request
-import datetime
 import os
 import typing
 from qt.core import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
                      QComboBox, QPushButton, QMessageBox, QIcon, QPixmap, 
-                     pyqtSignal, Qt, QObject, QSpinBox, QMenu, QTextEdit)
+                     pyqtSignal, Qt, QObject, QSpinBox, QMenu, QTextEdit, QTimer, QCheckBox)
 
-from calibre.gui2 import error_dialog
+from calibre.gui2 import error_dialog, Dispatcher
 from calibre.gui2.actions import InterfaceAction
 from calibre.gui2.threaded_jobs import ThreadedJob
 from calibre_plugins.ai_vision_metadata.config import prefs
+from calibre_plugins.ai_vision_metadata.filename_parser import parse_filename, read_filename_source, select_title_evidence
+from calibre_plugins.ai_vision_metadata.result_schema import normalize_result, extract_metadata_json
+from calibre_plugins.ai_vision_metadata.metadata_writer import apply_metadata_safely, snapshot_metadata, prepare_automatic_update, capture_filename_comments
 
 # This block is only 'True' when PyCharm is reading the code.
 # When Calibre runs the code, this is 'False' and gets completely ignored!
@@ -30,32 +31,156 @@ try:
 except NameError:
     pass
 
+# Built-in Simplified Chinese UI fallback. This keeps the plugin Chinese even
+# when calibre has no compiled locale available; provider/model names remain
+# unchanged. User prompts and filename contents are deliberately not translated.
+_CALIBRE_TRANSLATE = _
+_ZH_UI = {
+    'Extract metadata from original filename': '从原始文件名提取元数据', 'AI Provider:': 'AI 服务商：',
+    'API Key:': 'API 密钥：', 'Local Base URL (e.g., http://localhost:11434):': '本地服务地址（例如：http://localhost:11434）：',
+    'Model Name:': '模型名称：', 'Fetch Available Models': '获取可用模型', 'Network Timeout (seconds):': '网络超时（秒）：',
+    'DeepSeek: enable thinking (slower)': 'DeepSeek：启用思考模式（较慢）', 'System Prompt (Advanced):': '系统提示词（高级）：',
+    'Restore Default': '恢复默认', 'Are you sure you want to overwrite your custom prompt with the default instructions?': '确定要用默认说明覆盖自定义提示词吗？',
+    'Last Run Results': '最近运行结果', 'Show written and skipped books from the last run': '查看上次运行中已写入和跳过的书籍',
+    'AI Vision Error': 'AI 元数据错误', 'Missing Key': '缺少密钥', 'Missing URL': '缺少地址',
+    'Configure AI Vision': '配置', 'Settings for AI Vision Metadata': 'AI 元数据设置',
+    'Auto apply when clicking the plugin': '点击插件时直接应用AI元数据',
+    "Please enter your local server's Base URL.": '请输入本地服务器地址。', 'Success': '成功',
+    'Models refreshed successfully!': '模型列表刷新成功！', 'Analysis is already in progress.': '分析已经在进行中。',
+    'Please select at least one book.': '请至少选择一本书。', 'Analysis finished: {0} written, {1} skipped.': '分析完成：写入 {0} 本，跳过 {1} 本。',
+    'Library changed. The remaining analysis queue was cancelled.': '书库已改变，剩余分析队列已取消。',
+    'The analysis context or library changed. Metadata was not written.': '分析上下文或书库已改变，未写入元数据。',
+    'Get Local Tools:': '获取本地工具：', 'Error': '错误', 'Analyze Selected Books (Auto Apply)': '分析选中的书籍（自动应用）',
+    'Analyze and update selected books automatically': '自动分析并更新选中的书籍', 'Analyze Selected Books (Review Each)': '分析选中的书籍（逐本审核）',
+    'Manually review selected books': '逐本审核选中的书籍', 'Queued {0} books for analysis.': '已加入 {0} 本书的分析队列。',
+    'Analyzing filename for book ID: {0}': '正在分析书籍 {0} 的文件名', 'The AI returned an empty response for the filename request.': 'AI 对文件名请求返回了空响应。',
+    'The AI job failed.': 'AI 任务失败。', 'Library changed. This analysis result was discarded.': '书库已改变，此分析结果已丢弃。',
+    'UI Error': '界面错误', 'Please enter your API key for {0}.': '请输入 {0} 的 API 密钥。',
+    'Book ID {0} no longer exists. Skipping.': '书籍 {0} 已不存在，跳过。', 'Unknown AI Provider selected.': '选择了未知的 AI 服务商。',
+    'The AI blocked this filename request due to its safety filters.': 'AI 的安全过滤器阻止了该文件名请求。', 'AI Vision Failed': 'AI 分析失败',
+    'Metadata was not written safely: {0}': '元数据未安全写入：{0}', 'Failed to fetch models: {0}': '获取模型失败：{0}',
+    'The AI took too long to analyze the filename. Please try again.': 'AI 分析文件名耗时过长，请重试。',
+    'API Error: {0} server was unavailable after multiple retries.': 'API 错误：{0} 服务器多次重试后仍不可用。',
+    'Data Parsing Error: {0}': '数据解析错误：{0}', 'Could not launch review: {0}': '无法打开审核窗口：{0}',
+    'Get Google API Key': '获取 Google API 密钥', 'Get OpenAI API Key': '获取 OpenAI API 密钥', 'Get DeepSeek API Key': '获取 DeepSeek API 密钥',
+    'Get Anthropic API Key': '获取 Anthropic API 密钥', 'Get OpenRouter API Key': '获取 OpenRouter API 密钥',
+    'Network connection failed: {0}': '网络连接失败：{0}', 'An unexpected error occurred: {0}': '发生意外错误：{0}',
+    '{0} API Error ({1}): {2}': '{0} API 错误（{1}）：{2}', '{0} API Error (HTTP {1}): {2}': '{0} API 错误（HTTP {1}）：{2}',
+    'AI result failed validation: {0}': 'AI 结果校验失败：{0}',
+}
+def _(text: str) -> str:
+    return _ZH_UI.get(text, _CALIBRE_TRANSLATE(text))
+
 class WorkerSignals(QObject):
     review_signal = pyqtSignal(object, object, object)
     error_signal = pyqtSignal(str)  
 
 DEFAULT_PROMPT = (
-    "Analyze this publication cover. Your PRIMARY task is to read and extract information "
-    "visibly printed on THIS specific cover. "
-    "If the specific issue number, exact publication date, or current editor/publisher is not "
-    "printed on the cover, use your Google Search tool to find the official publication details "
-    "for this exact issue. Do NOT substitute data from older or different issues. "
-    "Return ONLY a JSON object with the following keys. "
-    "Format requirements: "
-    "'series' (string: the base name of the publication), "
-    "'volume' (string: the volume number ONLY, converted to standard Arabic numerals, e.g., '48' instead of 'XLVIII'), "
-    "'issue_number' (string: the absolute issue number ONLY, converted to standard Arabic numerals. Do not include the volume.), "
-    "'title' (string: format strictly as '[Publication Name], [Date], Volume [Vol], Issue [Num]'), "
-    "'creators' (list of strings: the main artists or authors or editors. If this is a magazine, you MUST use Google Search to find the current Editor-in-Chief or Managing Editor or Editor for this date and list them here), "
-    "'pub_year' (integer: the specific year of this issue), "
-    "'pub_month' (integer), 'pub_day' (integer), "
-    "'publisher' (string: the publishing company or organization), "
-    "'ids' (string: format as 'issn:XXXX-XXXX' or 'isbn:XXXXXXXXXX'), "
-    "'format_type' (string: e.g., 'magazine', 'comic', 'newspaper', 'book'), "
-    "'comments' (string: A brief, 2-to-3 sentence description or summary of this specific issue based on the cover art, headline teasers, and web search context. Explicitly list the main themes, articles, or stories if they are readily available), "
-    "'tags' (list of strings: relevant subjects based on the specific cover art and text), "
-    "'languages' (list of strings: the 3-letter ISO 639-2 language codes, e.g., ['eng'], ['rus'], or ['deu'])."
+    "Parse this manga or doujinshi using only the original filename and existing metadata. "
+    "No cover image is supplied. Prioritize exact filename evidence over guesses. "
+    "Preserve the wording of an existing Chinese title from the filename. "
+    "With an explicit source volume number, format title as base title + one space + volume, "
+    "and use that same base title without the volume as series. "
+    "When there is no Chinese title, translate Japanese, Korean, or English original titles naturally into Simplified Chinese, "
+    "and mark it as an AI translation rather than an official title. Separate personal authors, circles and "
+    "translation groups. Never mix those values, event codes or edition markers into the title. "
+    "Return ONLY a compact JSON object containing title, translated_title, languages, and filename_roles. "
+    "Return tags as an empty list. Do not infer publisher, publication dates or identifiers. "
+    "A trailing parenthesized number can be a calibre book ID or file collision suffix, not a volume. "
+    "If the original filename is missing or truncated, extract the title from existing_title and translate it if it is Japanese, Korean, or English. "
+    "If neither input contains a title, leave the title empty and require review."
 )
+
+
+def build_context_prompt(prompt, context):
+    """Add only filename, current title, and deterministic filename evidence."""
+    title_parsed, title_input_source = select_title_evidence(
+        parse_filename(context.get('original_filename', '')), context.get('existing_title', ''),
+        context.get('original_filename_source', 'custom_column'))
+    hint_keys = ('original_title', 'translated_title', 'creators', 'circle', 'volume', 'chapter',
+                 'volume_range', 'chapter_range', 'title_language_hint', 'title_candidate_kind',
+                 'author_candidate_kind')
+    title_hints = {key: value for key, value in title_parsed.as_dict().items() if key in hint_keys and value}
+    source_context = (
+        f"\noriginal_filename: {context.get('original_filename', '')}\n"
+        f"filename_source: {context.get('original_filename_source', 'custom_column')}\n"
+        f"existing_title: {context.get('existing_title', '')}\n"
+        f"title_evidence_source: {title_input_source}\n"
+        f"title_candidates: {json.dumps(title_hints, ensure_ascii=False)}\n"
+    )
+    return (
+        prompt + "\n\nIMPORTANT COMIC FILENAME CONTEXT:\n"
+        "cover_image_supplied: false. Do not claim to have inspected the cover.\n"
+        "The following original filename is evidence. Preserve it exactly and never invent a replacement.\n"
+        "Classify filename roles yourself; deterministic candidates are fallible hints, especially a first-bracket author guess. "
+        "In the SAME metadata JSON object, return filename_roles with title_text (verbatim source title before translation), "
+        "author_texts (list of verbatim personal-author quotes), circle_text (verbatim circle or empty), "
+        "annotation_texts (list of verbatim annotation quotes), confidence (0 to 1), and uncertain (boolean). "
+        "Also return filename_roles.title_confidence (0 to 1) for identifying the source title alone. "
+        "Do not reduce title_confidence just because an author/circle is absent or unknown. "
+        "Unknown authors must be []; do not invent authors. Overall confidence still covers all assigned roles. "
+        "Also return filename_roles.title_language as 'zh', 'ja', 'ko', 'en', or 'unknown' for the quoted source title, "
+        "not the translation language. Han/kanji characters without kana do NOT prove a title is Chinese. "
+        "Determine the source title's language from its wording and filename context; Japanese titles can "
+        "contain only kanji. A translation-group tag does not prove the title itself is already Chinese. "
+        "For a Japanese or Korean source title, including an all-kanji Japanese title, return a natural Simplified Chinese "
+        "translation in title/translated_title while keeping title_text verbatim. "
+        "For an English source title, translate it into natural Simplified Chinese while preserving proper names. "
+        "A han_ambiguous hint is provisional source wording, not a confirmed Chinese translation. "
+        "Preserve a separately supplied Chinese title when Japanese original text is also present. "
+        "If the source language is ambiguous, return title_language='unknown' and uncertain=true. "
+        "A title mixing Chinese-looking Han characters and Japanese kana is still Japanese: translate "
+        "the entire title into natural Simplified Chinese, including kana phrases. Do not just simplify "
+        "kanji or copy the Japanese source into title/translated_title. "
+        "Copy each quote exactly from the selected title input, without enclosing metadata brackets. "
+        "Use original_filename for filename title evidence; use existing_title only when title_evidence_source is existing_title. "
+        "Do not translate or normalize quoted roles; put the Simplified Chinese translation in title/translated_title. "
+        "Exclude archive extensions and download/import collision suffixes from title_text. "
+        "Separate author, title, circle, translation group, event, and edition by meaning, not just bracket position. "
+        "An author must occur in the input; do not invent one or infer it from external knowledge. "
+        "Preserve explicit Circle(Author) evidence and clear Chinese title wording. "
+        "If roles cannot be distinguished, set uncertain=true; automatic mode will skip the book without a confirmation dialog. "
+        "If the filename already contains a clear Chinese title, preserve its wording in translated_title and title. "
+        "When the source has an explicit volume marker or terminal title number, format title and translated_title "
+        "as the base title followed by exactly one space and the source volume number, for example '直到紫藤花盛开 2'. "
+        "Use exactly that base title as series, for example '直到紫藤花盛开', without the volume number. "
+        "Local naming rules take precedence: C followed by 2-4 digits is an event code, never a chapter; "
+        "Circle(Author) is creator evidence; bare terminal title numbers are volumes. "
+        "Keep explicit chapter numbers separate from volumes. Preserve decimal volumes and ranges exactly; "
+        "never choose one volume from a range or combine chapter and volume into a decimal. "
+        "Translate the base title, preserving source numbering. Separate [Vol. 2] and [Ch.15] groups "
+        "may be annotation quotes and must not become authors. "
+        "For translated manga return languages as ['zho']. Return tags as an empty list. Leave publisher, "
+        "publication dates and identifiers empty. "
+        "A calibre_path_fallback is an unreliable directory name whose terminal (number) is a book ID, not a volume. "
+        "When the directory fallback is truncated or has only metadata groups, use the cleaned title_candidates "
+        "from existing_title. Preserve its Chinese title, or translate its Japanese title into Simplified Chinese. "
+        "Only if neither input has a title, leave it empty. Do not return the entire existing filename as the title. "
+        "In the common [Author]Title[translation][notes] layout, the unbracketed middle text is the title; "
+        "trailing brackets such as [中国翻译] and [禁漫去码] are annotations, never titles. "
+        "For other layouts, use semantic role classification to correct bracket-position guesses; "
+        "a bracket alone does not prove that its content is an author or a title. "
+        "For a standalone work with no explicit volume marker or terminal title number in the source text, "
+        "leave series, volume and issue_number empty. Do not copy a standalone title into series. "
+        "Do not call an AI translation an official translation. Unknown facts must be empty and review_required must be true. "
+        "Return exactly one complete metadata JSON object. Do not echo the response_format setting "
+        "or output a separate {'type':'json_object'} object."
+        " For efficient output return only title, translated_title, languages, and filename_roles. "
+        "Omit redundant original_title, filename copies, explanations, evidence arrays, empty metadata, "
+        "series and volume (the plugin derives numbering locally). Keep the JSON compact. "
+        "Never append publication volume/issue/date numbers, event numbers, edition codes or file IDs "
+        "to a translated work title. For example (COMIC magazine Vol.18) is publication metadata, "
+        "not work volume 18; keep such text in annotation_texts only. "
+        + source_context
+        + ("\nTRANSLATION CORRECTION: Your previous response left the non-Chinese translation missing "
+           "or filename-role classification uncertain. Recheck the full input and translate this "
+           "verbatim source title fully into Simplified Chinese: "
+           + json.dumps(context['translation_repair_source'], ensure_ascii=False)
+           + ". Return the full metadata JSON and verbatim filename_roles again. "
+           "title/translated_title must contain the Chinese translation, without Japanese kana or Korean Hangul. "
+           "Keep the original in original_title and filename_roles.title_text."
+           if context.get('translation_repair_source') else '')
+    )
 
 class ConfigWidget(QWidget):
     def __init__(self):
@@ -68,7 +193,7 @@ class ConfigWidget(QWidget):
         self.l.addWidget(self.label_provider)
         
         self.provider_combo = QComboBox(self)
-        self.providers = ['Google Gemini', 'OpenAI', 'Anthropic', 'OpenRouter', 'Local (Ollama/LM Studio)']
+        self.providers = ['Google Gemini', 'OpenAI', 'DeepSeek', 'Anthropic', 'OpenRouter', 'Local (Ollama/LM Studio)']
         self.provider_combo.addItems(self.providers)
         
         # --- Load saved provider, defaulting to Google ---
@@ -95,6 +220,11 @@ class ConfigWidget(QWidget):
         self.key_openai = QLineEdit(self)
         self.key_openai.setText(prefs.get('api_key_openai', ''))
         self.l.addWidget(self.key_openai)
+
+        # DeepSeek Key (OpenAI-compatible API)
+        self.key_deepseek = QLineEdit(self)
+        self.key_deepseek.setText(prefs.get('api_key_deepseek', ''))
+        self.l.addWidget(self.key_deepseek)
         
         # Anthropic Key
         self.key_anthropic = QLineEdit(self)
@@ -134,6 +264,14 @@ class ConfigWidget(QWidget):
         self.model_openai.addItem(saved_openai)
         self.model_openai.setCurrentText(saved_openai)
         self.model_layout.addWidget(self.model_openai)
+
+        # DeepSeek Model
+        self.model_deepseek = QComboBox(self)
+        self.model_deepseek.setEditable(True)
+        saved_deepseek = prefs.get('model_deepseek', 'deepseek-flash')
+        self.model_deepseek.addItem(saved_deepseek)
+        self.model_deepseek.setCurrentText(saved_deepseek)
+        self.model_layout.addWidget(self.model_deepseek)
         
         # Anthropic Model
         self.model_anthropic = QComboBox(self)
@@ -173,6 +311,13 @@ class ConfigWidget(QWidget):
         self.timeout_spin.setRange(30, 86400) 
         self.timeout_spin.setValue(int(prefs.get('timeout', 300)))
         self.l.addWidget(self.timeout_spin)
+        self.deepseek_thinking = QCheckBox(_('DeepSeek: enable thinking (slower)'), self)
+        self.deepseek_thinking.setChecked(bool(prefs.get('deepseek_thinking', False)))
+        self.l.addWidget(self.deepseek_thinking)
+        self.auto_apply_on_click = QCheckBox(_('Auto apply when clicking the plugin'), self)
+        self.auto_apply_on_click.setChecked(bool(prefs.get('auto_apply_on_click', False)))
+        self.l.addWidget(self.auto_apply_on_click)
+
 
         # --- 6. Prompt Tuning Area (Dedicated Memory Banks) ---
         self.prompt_layout = QHBoxLayout()
@@ -199,6 +344,12 @@ class ConfigWidget(QWidget):
         self.prompt_openai.setMinimumHeight(150)
         self.prompt_openai.setPlainText(prefs.get('prompt_openai', DEFAULT_PROMPT))
         self.l.addWidget(self.prompt_openai)
+
+        self.prompt_deepseek = QTextEdit(self)
+        self.prompt_deepseek.setAcceptRichText(False)
+        self.prompt_deepseek.setMinimumHeight(150)
+        self.prompt_deepseek.setPlainText(prefs.get('prompt_deepseek', prefs.get('prompt_openai', DEFAULT_PROMPT)))
+        self.l.addWidget(self.prompt_deepseek)
         
         # Anthropic Prompt
         self.prompt_anthropic = QTextEdit(self)
@@ -232,20 +383,24 @@ class ConfigWidget(QWidget):
         # Hide all key inputs first to reset the board
         self.key_google.setVisible(False)
         self.key_openai.setVisible(False)
+        self.key_deepseek.setVisible(False)
         self.key_anthropic.setVisible(False)
         self.key_openrouter.setVisible(False)
         # Hide all model combos first
         self.model_google.setVisible(False)
         self.model_openai.setVisible(False)
+        self.model_deepseek.setVisible(False)
         self.model_anthropic.setVisible(False)
         self.model_openrouter.setVisible(False)
         self.model_local.setVisible(False)        
         # Hide all prompt editing areas first
         self.prompt_google.setVisible(False)
         self.prompt_openai.setVisible(False)
+        self.prompt_deepseek.setVisible(False)
         self.prompt_anthropic.setVisible(False)
         self.prompt_openrouter.setVisible(False)
         self.prompt_local.setVisible(False)
+        self.deepseek_thinking.setVisible(provider == 'DeepSeek')
         
         if provider == 'Local (Ollama/LM Studio)':
             self.link_label.setText(_("Get Local Tools:") + ' <a href="https://ollama.com/download">Ollama</a> | <a href="https://lmstudio.ai/">LM Studio</a>')
@@ -269,6 +424,11 @@ class ConfigWidget(QWidget):
                 self.key_openai.setVisible(True)
                 self.model_openai.setVisible(True)
                 self.prompt_openai.setVisible(True)
+            elif provider == 'DeepSeek':
+                self.link_label.setText('<a href="https://platform.deepseek.com/api_keys">' + _("Get DeepSeek API Key") + '</a>')
+                self.key_deepseek.setVisible(True)
+                self.model_deepseek.setVisible(True)
+                self.prompt_deepseek.setVisible(True)
             elif provider == 'Anthropic':
                 self.link_label.setText('<a href="https://console.anthropic.com/settings/keys">' + _("Get Anthropic API Key") + '</a>')
                 self.key_anthropic.setVisible(True)
@@ -291,6 +451,9 @@ class ConfigWidget(QWidget):
         elif provider == 'OpenAI':
             api_key = self.key_openai.text().strip()
             active_combo = self.model_openai
+        elif provider == 'DeepSeek':
+            api_key = self.key_deepseek.text().strip()
+            active_combo = self.model_deepseek
         elif provider == 'Anthropic':
             api_key = self.key_anthropic.text().strip()
             active_combo = self.model_anthropic
@@ -328,15 +491,15 @@ class ConfigWidget(QWidget):
                         if model_id not in exclusion_list:
                             active_combo.addItem(model_id)
                             
-            elif provider == 'OpenAI':
-                url = "https://api.openai.com/v1/models"
+            elif provider in ['OpenAI', 'DeepSeek']:
+                url = "https://api.deepseek.com/v1/models" if provider == 'DeepSeek' else "https://api.openai.com/v1/models"
                 req = urllib.request.Request(url, headers={'Authorization': f'Bearer {api_key}'})
                 with urllib.request.urlopen(req, timeout=15) as response:
                     data = json.loads(response.read().decode('utf-8'))
                 
                 for model in data.get('data', []):
                     model_id = model.get('id', '')
-                    if 'gpt-4o' in model_id or 'gpt-4-turbo' in model_id:
+                    if provider == 'DeepSeek' or 'gpt-4o' in model_id or 'gpt-4-turbo' in model_id:
                         active_combo.addItem(model_id)
                         
             elif provider == 'Anthropic':
@@ -399,8 +562,12 @@ class ConfigWidget(QWidget):
                 self.prompt_google.setPlainText(DEFAULT_PROMPT)
             elif provider == 'OpenAI':
                 self.prompt_openai.setPlainText(DEFAULT_PROMPT)
+            elif provider == 'DeepSeek':
+                self.prompt_deepseek.setPlainText(DEFAULT_PROMPT)
             elif provider == 'Anthropic':
                 self.prompt_anthropic.setPlainText(DEFAULT_PROMPT)
+            elif provider == 'OpenRouter':
+                self.prompt_openrouter.setPlainText(DEFAULT_PROMPT)
             elif provider == 'Local (Ollama/LM Studio)':
                 self.prompt_local.setPlainText(DEFAULT_PROMPT)
 
@@ -411,6 +578,7 @@ class ConfigWidget(QWidget):
         # 2. Save API Keys & URLs
         prefs['api_key_google'] = self.key_google.text().strip()
         prefs['api_key_openai'] = self.key_openai.text().strip()
+        prefs['api_key_deepseek'] = self.key_deepseek.text().strip()
         prefs['api_key_anthropic'] = self.key_anthropic.text().strip()
         prefs['api_key_openrouter'] = self.key_openrouter.text().strip()
         prefs['local_url'] = self.url_input.text().strip()
@@ -418,6 +586,7 @@ class ConfigWidget(QWidget):
         # 3. Save Models
         prefs['model_google'] = self.model_google.currentText().strip()
         prefs['model_openai'] = self.model_openai.currentText().strip()
+        prefs['model_deepseek'] = self.model_deepseek.currentText().strip()
         prefs['model_anthropic'] = self.model_anthropic.currentText().strip()
         prefs['model_openrouter'] = self.model_openrouter.currentText().strip()
         prefs['model_local'] = self.model_local.currentText().strip()
@@ -425,21 +594,30 @@ class ConfigWidget(QWidget):
         # 4. Save Custom Prompts
         prefs['prompt_google'] = self.prompt_google.toPlainText().strip()
         prefs['prompt_openai'] = self.prompt_openai.toPlainText().strip()
+        prefs['prompt_deepseek'] = self.prompt_deepseek.toPlainText().strip()
         prefs['prompt_anthropic'] = self.prompt_anthropic.toPlainText().strip()
         prefs['prompt_openrouter'] = self.prompt_openrouter.toPlainText().strip()
         prefs['prompt_local'] = self.prompt_local.toPlainText().strip()
         
         # 5. Save General Settings
         prefs['timeout'] = self.timeout_spin.value()
+        prefs['deepseek_thinking'] = self.deepseek_thinking.isChecked()
+        prefs['auto_apply_on_click'] = self.auto_apply_on_click.isChecked()
 
 class AIVisionAction(InterfaceAction):
-    name = 'AI Vision Metadata' # DO NOT TRANSLATE
-    action_spec = ('AI Vision Metadata', 'images/icon.png', _('Identify book via AI Vision'), 'Ctrl+Shift+I')
+    name = 'MetaManga'
+    action_spec = ('漫元', 'images/icon.png', _('Extract metadata from original filename'), 'Ctrl+Shift+I')
 
     def genesis(self):
-        # --- NEW: State Trackers for Blind Batch ---
-        self.is_blind_batch = False
-        self.approved_batch_fields = {}
+        self.batch_queue = []
+        self.queue_active = False
+        self.queue_db = None
+        self.queue_library_id = None
+        self.pending_context = {}
+        self.library_value_cache = {}
+        self.review_each = False
+        self.active_book_id = None
+        self.batch_results = []
         # -----------------------------------------
 
         self.signals = WorkerSignals()
@@ -449,26 +627,17 @@ class AIVisionAction(InterfaceAction):
         self.qaction.triggered.connect(self.identify_book)
         self.menu = QMenu(self.gui)
 
-        self.run_action = self.create_action(
-            spec=(_('Identify Cover'), 'images/icon.png', _('Run AI Vision Metadata on selected book'), None),
-            attr='run_action'
+        self.report_action = self.create_action(
+            spec=(_('Last Run Results'), None, _('Show written and skipped books from the last run'), None),
+            attr='report_action'
         )
-        self.run_action.triggered.connect(self.identify_book)
-        self.menu.addAction(self.run_action)
-
-        # --- NEW: Blind Batch Menu Action ---
-        self.batch_action = self.create_action(
-            spec=('Blind Batch Process', 'images/icon.png', 'Process selected books without review', None),
-            attr='batch_action'
-        )
-        self.batch_action.triggered.connect(self.start_blind_batch)
-        self.menu.addAction(self.batch_action)
-        # ------------------------------------
+        self.report_action.triggered.connect(self.show_last_results)
+        self.menu.addAction(self.report_action)
 
         self.menu.addSeparator()
 
         self.config_action = self.create_action(
-            spec=('Configure AI Vision', 'images/config.png', 'Settings for AI Vision Metadata', None),
+            spec=(_('Configure AI Vision'), 'images/config.png', _('Settings for AI Vision Metadata'), None),
             attr='config_action'
         )
         self.config_action.triggered.connect(self.show_configuration)
@@ -484,8 +653,6 @@ class AIVisionAction(InterfaceAction):
                 pixmap.loadFromData(icon_data)
                 main_icon = QIcon(pixmap)
                 self.qaction.setIcon(main_icon)
-                self.run_action.setIcon(main_icon)
-                self.batch_action.setIcon(main_icon)
 
             config_data = resources.get('images/config.png')
             if config_data:
@@ -496,31 +663,65 @@ class AIVisionAction(InterfaceAction):
             pass
 
     def start_blind_batch(self):
-        rows = self.gui.library_view.selectionModel().selectedRows()
-        if not rows or len(rows) == 0:
-            from calibre.gui2 import error_dialog
-            return error_dialog(self.gui, _('No Selection'), _('Please select at least one book.'), show=True)
-
-        from calibre_plugins.ai_vision_metadata.ui import BlindBatchDialog
-        d = BlindBatchDialog(self.gui)
-        if d.exec_() == d.Accepted:
-            self.is_blind_batch = True
-            self.approved_batch_fields = d.get_selected_fields()
-
-            self.batch_queue = [self.gui.library_view.model().id(row) for row in rows]
-            self.process_next_in_queue()
-        else:
-            self.is_blind_batch = False
+        # Compatibility for previously bound shortcuts.
+        self.identify_book()
 
     def identify_book(self):
-        self.is_blind_batch = False  # Ensure standard mode resets the bypass flag
+        # Keep legacy installations automatic until the new preference is saved.
+        # New installations expose the option unchecked in ConfigWidget.
+        auto_apply = prefs.get('auto_apply_on_click', True)
+        self.start_analysis(review_each=not bool(auto_apply))
+
+    def identify_books_with_review(self):
+        self.start_analysis(review_each=True)
+
+    def start_analysis(self, review_each=False):
+        if self.queue_active:
+            self._status_message(_("Analysis is already in progress."))
+            return
         rows = self.gui.library_view.selectionModel().selectedRows()
         if not rows or len(rows) == 0:
-            from calibre.gui2 import error_dialog
-            return error_dialog(self.gui, _('No Selection'), _('Please select at least one book.'), show=True)
+            self._status_message(_('Please select at least one book.'))
+            return
 
+        self.review_each = review_each
+        self.batch_results = []
+        self.pending_context.clear()
         self.batch_queue = [self.gui.library_view.model().id(row) for row in rows]
+        self.queue_db = self.gui.current_db.new_api
+        self.queue_library_id = self.queue_db.library_id
+        self.library_value_cache = {}
+        self.queue_active = True
+        self._status_message(_("Queued {0} books for analysis.").format(len(self.batch_queue)))
         self.process_next_in_queue()
+
+    def _status_message(self, message):
+        self.gui.status_bar.showMessage(message, 15000)
+
+    def _record_result(self, book_id, status, reason='', metadata=None):
+        metadata = metadata or {}
+        self.batch_results.append({'book_id': book_id, 'status': status, 'reason': reason,
+                                   'seconds': metadata.get('api_duration', ''),
+                                   'diagnostics': {key: metadata[key] for key in (
+                                       'title', 'original_title', 'translated_title', 'provider_title',
+                                       'provider_translated_title', 'title_language_hint', 'translation_status',
+                                       'filename_role_status', 'filename_roles', 'title_only', 'warnings') if key in metadata},
+                                   'request_metrics': metadata.get('request_metrics', {})})
+
+    def _result_summary(self):
+        written = sum(result['status'] == 'written' for result in self.batch_results)
+        return _("Analysis finished: {0} written, {1} skipped.").format(written, len(self.batch_results) - written)
+
+    def show_last_results(self):
+        report = QMessageBox(self.gui)
+        report.setWindowTitle(_('Last Run Results'))
+        report.setText(self._result_summary())
+        report.setDetailedText('\n'.join(
+            "Book {book_id}: {status} {reason}; {seconds}s; {request_metrics}".format(**result)
+            + '\n' + json.dumps(result.get('diagnostics', {}), ensure_ascii=False, indent=2)
+            for result in self.batch_results
+        ))
+        report.exec()
 
     def show_configuration(self):
         # This native Calibre command instantly summons the ConfigWidget
@@ -529,12 +730,55 @@ class AIVisionAction(InterfaceAction):
     def process_next_in_queue(self):
         """Pops the next book from the queue and starts the AI job."""
         if not hasattr(self, 'batch_queue') or not self.batch_queue:
-            # The queue is empty, the batch is done!
+            self.queue_active = False
+            self.pending_context.clear()
+            self.active_book_id = None
+            self._status_message(self._result_summary())
+            return
+
+        db = self.gui.current_db.new_api
+        if db is not self.queue_db or db.library_id != self.queue_library_id:
+            for remaining_id in self.batch_queue:
+                self._record_result(remaining_id, 'skipped', 'library_changed')
+            self.batch_queue.clear()
+            self.queue_active = False
+            self.pending_context.clear()
+            self.signals.error_signal.emit(_("Library changed. The remaining analysis queue was cancelled."))
             return
 
         # Pop the first ID off the front of the list
         book_id = self.batch_queue.pop(0)
-        db = self.gui.current_db.new_api
+        self.active_book_id = book_id
+        library_id = getattr(db, 'library_id', None)
+
+        if not db.has_id(book_id):
+            self._record_result(book_id, 'skipped', 'book_missing')
+            self.signals.error_signal.emit(_("Book ID {0} no longer exists. Skipping.").format(book_id))
+            QTimer.singleShot(0, self.process_next_in_queue)
+            return
+
+        current_mi = db.get_metadata(book_id)
+        source = read_filename_source(db, book_id)
+        comments_context = capture_filename_comments(db, book_id, source, current_mi)
+        if (source['original_filename_source'] == 'calibre_path_fallback'
+                and comments_context['source'] == 'analysis_history'):
+            # The prior input can also repair a title already misidentified by
+            # an older release. Do not let the new/wrong title override it.
+            source = dict(source, original_filename=comments_context['text'],
+                          original_filename_source='analysis_history')
+        original_filename = source['original_filename']
+        parsed = parse_filename(original_filename)
+        context = {
+            'library_id': library_id,
+            'snapshot': snapshot_metadata(db, book_id),
+            'original_filename': original_filename,
+            **source,
+            'parsed_filename': parsed.as_dict(),
+            'existing_title': current_mi.title,
+            'comments_context': comments_context,
+            'send_cover_image': False,
+        }
+        self.pending_context[book_id] = context
 
         # Fetch the cover path
         rel_path = db.field_for('path', book_id)
@@ -544,47 +788,21 @@ class AIVisionAction(InterfaceAction):
         else:
             cover_path = None
 
-        if not cover_path or not os.path.exists(cover_path):
-            # If there's no cover, show an error for this book and immediately grab the next one!
-            self.signals.error_signal.emit(_("Book ID {0} has no cover image to process. Skipping to next.").format(book_id))
-            self.process_next_in_queue()
-            return
-
         # Launch the background thread
         from calibre.gui2.threaded_jobs import ThreadedJob
         job = ThreadedJob(
             'identifying_book', 
-            _('Analyzing cover for book ID: {0}').format(book_id),  
+            _('Analyzing filename for book ID: {0}').format(book_id),
             self.run_api_request, 
-            (book_id, cover_path, ""), # Passing "" since api_key_ignored is no longer used
+            (book_id, cover_path, "", context), # Passing "" since api_key_ignored is no longer used
             {}, 
-            self.job_finished
+            Dispatcher(self.job_finished)
         )
         self.gui.job_manager.run_threaded_job(job)
 
-    def run_api_request(self, book_id, cover_path, api_key_ignored, **kwargs):
+    def run_api_request(self, book_id, cover_path, api_key_ignored, context=None, **kwargs):
         import time
         start_time = time.time() # --- Start the clock ---
-
-        from qt.core import QImage, QByteArray, QBuffer, Qt
-        
-        # 1. Load the image into memory using Qt
-        img = QImage(cover_path)
-        
-        # 2. Check if the image is massive. If so, scale it down to a max of 2000px
-        max_size = 2000
-        if img.width() > max_size or img.height() > max_size:
-            img = img.scaled(max_size, max_size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-            
-        # 3. Save the optimized image to a temporary memory buffer as a JPEG
-        byte_array = QByteArray()
-        buffer = QBuffer(byte_array)
-        buffer.open(QBuffer.OpenModeFlag.WriteOnly)
-        # 85% quality is visually indistinguishable and perfect for AI OCR
-        img.save(buffer, "JPEG", quality=85) 
-        
-        # 4. Encode the lightweight memory buffer to Base64
-        img_data = base64.b64encode(byte_array.data()).decode('utf-8')
 
         provider = prefs.get('ai_provider', 'Google Gemini')
         local_url = prefs.get('local_url', 'http://localhost:11434').rstrip('/')
@@ -598,6 +816,10 @@ class AIVisionAction(InterfaceAction):
             api_key = prefs.get('api_key_openai', '')
             model_name = prefs.get('model_openai', 'gpt-4o')
             prompt = prefs.get('prompt_openai', DEFAULT_PROMPT)
+        elif provider == 'DeepSeek':
+            api_key = prefs.get('api_key_deepseek', '')
+            model_name = prefs.get('model_deepseek', 'deepseek-flash')
+            prompt = prefs.get('prompt_deepseek', prefs.get('prompt_openai', DEFAULT_PROMPT))
         elif provider == 'Anthropic':
             api_key = prefs.get('api_key_anthropic', '')
             model_name = prefs.get('model_anthropic', 'claude-sonnet-4-6')
@@ -611,8 +833,10 @@ class AIVisionAction(InterfaceAction):
             model_name = prefs.get('model_local', 'llava')
             prompt = prefs.get('prompt_local', DEFAULT_PROMPT)
             
-        if not prompt: 
+        if not prompt:
             prompt = DEFAULT_PROMPT
+        if context:
+            prompt = build_context_prompt(prompt, context)
         # -----------------------------------
 
         # --- DYNAMIC ROUTING & PAYLOAD BUILDER ---
@@ -620,65 +844,55 @@ class AIVisionAction(InterfaceAction):
 
         if provider == 'Google Gemini':
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+            parts = [{"text": prompt}]
             payload = {
                 "contents": [{
-                    "parts": [
-                        {"text": prompt},
-                        {"inline_data": {"mime_type": "image/jpeg", "data": img_data}}
-                    ]
-                }],
-                "tools": [{"googleSearch": {}}]
+                    "parts": parts
+                }]
             }
 
-        elif provider in ['OpenAI', 'OpenRouter', 'Local (Ollama/LM Studio)']:
-            if provider == 'OpenAI':
-                url = "https://api.openai.com/v1/chat/completions"
+        elif provider in ['OpenAI', 'DeepSeek', 'OpenRouter', 'Local (Ollama/LM Studio)']:
+            if provider in ['OpenAI', 'DeepSeek']:
+                url = "https://api.deepseek.com/v1/chat/completions" if provider == 'DeepSeek' else "https://api.openai.com/v1/chat/completions"
                 headers['Authorization'] = f'Bearer {api_key}'
             elif provider == 'OpenRouter':
                 url = "https://openrouter.ai/api/v1/chat/completions" # Fixed endpoint
                 headers['Authorization'] = f'Bearer {api_key}'
                 headers['HTTP-Referer'] = "https://www.mobileread.com/forums/showthread.php?t=372744"
-                headers['X-Title'] = "Calibre AI Vision Metadata Plugin"
+                headers['X-Title'] = "Calibre 漫元 MetaManga Plugin"
             else:
                 url = f"{local_url}/v1/chat/completions"
 
+            message_content = [{"type": "text", "text": prompt}]
             payload = {
                 "model": model_name,
                 "messages": [
                     {
                         "role": "user",
-                        "content": [
-                            {"type": "text", "text": prompt},
-                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_data}"}}
-                        ]
+                        "content": message_content
                     }
                 ],
                 # This explicitly tells OpenAI/OpenRouter/Ollama to format their output as JSON
                 "response_format": {"type": "json_object"} 
             }
+            if provider == 'DeepSeek':
+                thinking_enabled = bool(prefs.get('deepseek_thinking', False))
+                payload['thinking'] = {'type': 'enabled' if thinking_enabled else 'disabled'}
+                payload['max_tokens'] = 8192 if thinking_enabled else 2048
 
         elif provider == 'Anthropic':
             url = "https://api.anthropic.com/v1/messages"
             headers['x-api-key'] = api_key
             headers['anthropic-version'] = '2023-06-01'
 
+            anthropic_content = [{"type": "text", "text": prompt}]
             payload = {
                 "model": model_name,
                 "max_tokens": 1024,
                 "messages": [
                     {
                         "role": "user",
-                        "content": [
-                            {
-                                "type": "image",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": "image/jpeg",
-                                    "data": img_data
-                                }
-                            },
-                            {"type": "text", "text": prompt}
-                        ]
+                        "content": anthropic_content
                     }
                 ]
             }
@@ -700,20 +914,33 @@ class AIVisionAction(InterfaceAction):
             max_retries = 3
             base_delay = 2
             res_json = None
+            request_timings = []
+            retry_wait_seconds = 0
+            response_body = b''
 
             for attempt in range(max_retries):
+                attempt_start = time.time()
                 try:
                     # Pass the dynamic timeout variable to the request
                     with urllib.request.urlopen(req, timeout=timeout_val) as response:
-                        res_json = json.loads(response.read().decode('utf-8'))
+                        headers_received = time.time()
+                        response_body = response.read()
+                        body_received = time.time()
+                        res_json = json.loads(response_body.decode('utf-8'))
+                    request_timings.append({'attempt': attempt + 1,
+                                            'headers_seconds': round(headers_received - attempt_start, 3),
+                                            'body_seconds': round(body_received - headers_received, 3)})
                     
                     # If the call succeeds, break out of the retry loop immediately!
                     break 
 
                 except urllib.error.HTTPError as http_err:
+                    request_timings.append({'attempt': attempt + 1, 'http_status': http_err.code,
+                                            'request_seconds': round(time.time() - attempt_start, 3)})
                     # Check specifically for Google 503s or generic 429 Rate Limits
                     if http_err.code in [429, 503] and attempt < max_retries - 1:
                         sleep_time = base_delay * (2 ** attempt)
+                        retry_wait_seconds += sleep_time
                         time.sleep(sleep_time)
                         continue # Loop around and try the request again
                     else:
@@ -735,7 +962,7 @@ class AIVisionAction(InterfaceAction):
                             return {"error_msg": _("{0} API Error (HTTP {1}): {2}").format(provider, http_err.code, error_body)}
 
                 except TimeoutError:
-                    return {"error_msg": _("The AI took too long to analyze the cover and search the web. Please try again.")}
+                    return {"error_msg": _("The AI took too long to analyze the filename. Please try again.")}
                 except urllib.error.URLError as url_err:
                     return {"error_msg": _("Network connection failed: {0}").format(url_err.reason)}
                 except Exception as e:
@@ -751,12 +978,12 @@ class AIVisionAction(InterfaceAction):
             if provider == 'Google Gemini':
                 candidate = res_json.get('candidates', [{}])[0]
                 if candidate.get('finishReason') == 'SAFETY':
-                    return {"error_msg": _("The AI blocked this cover due to its safety filters.")}
+                    return {"error_msg": _("The AI blocked this filename request due to its safety filters.")}
                 parts = candidate.get('content', {}).get('parts', [])
                 if parts:
                     raw_text = parts[0].get('text', '')
 
-            elif provider in ['OpenAI', 'OpenRouter', 'Local (Ollama/LM Studio)']:
+            elif provider in ['OpenAI', 'DeepSeek', 'OpenRouter', 'Local (Ollama/LM Studio)']:
                 choices = res_json.get('choices', [])
                 if choices:
                     raw_text = choices[0].get('message', {}).get('content', '')
@@ -767,52 +994,70 @@ class AIVisionAction(InterfaceAction):
                     raw_text = content_blocks[0].get('text', '')
 
             if not raw_text:
-                return {"error_msg": _("The AI returned an empty response. The model may have failed to process the image.")}
+                return {"error_msg": _("The AI returned an empty response for the filename request.")}
                 
-            # --- SURGICAL JSON EXTRACTION ---
-            def extract_json_dict(text_payload):
-                # 1. Strip markdown code blocks if the AI used them
-                if "```json" in text_payload:
-                    text_payload = text_payload.split("```json")[1].split("```")[0]
-                elif "```" in text_payload:
-                    text_payload = text_payload.split("```")[1].split("```")[0]
-                    
-                # 2. Find the absolute first and last curly braces
-                start_idx = text_payload.find('{')
-                end_idx = text_payload.rfind('}')
-                
-                if start_idx != -1 and end_idx != -1:
-                    clean_text = text_payload[start_idx:end_idx+1]
-                    try:
-                        parsed_data = json.loads(clean_text)
-                        # Ensure it returned a dictionary, not a parsed string
-                        if isinstance(parsed_data, dict):
-                            return parsed_data
-                    except json.JSONDecodeError:
-                        pass
-                # Return empty dictionary if all extraction fails
-                return {}
+            try:
+                metadata = extract_metadata_json(raw_text)
+            except ValueError as json_error:
+                return {"error_msg": _("Data Parsing Error: {0}\nRaw Output: {1}...").format(str(json_error), raw_text[:150])}
 
-            metadata = extract_json_dict(raw_text)
-
-            expected_keys = ["title", "creators", "publisher", "published", "series", "tags", "identifiers", "comments"]
-
-            # Create a list of the AI's keys, forced to lowercase
-            ai_keys = [str(k).lower() for k in metadata.keys()]
-
-            # Check if at least one expected key exists in the AI's response
-            if not any(key in ai_keys for key in expected_keys):
-                return {"error_msg": _(
-                    "The AI returned data, but failed to follow the requested schema. Your local model may be too small or lacks the logic to follow strict JSON formatting instructions.")}
-            
-            if not metadata:
-                return {"error_msg": _("Data Parsing Error: Could not extract valid JSON from AI output.\nRaw Output: {0}...").format(raw_text[:150])}
+            try:
+                metadata = normalize_result(
+                    metadata,
+                    (context or {}).get('original_filename', ''),
+                    parse_filename((context or {}).get('original_filename', '')),
+                    allowed_tags=set((context or {}).get('allowed_tags', []) or []),
+                    existing_title=(context or {}).get('existing_title', ''),
+                    filename_source=(context or {}).get('original_filename_source', 'custom_column'),
+                    comments_context=(context or {}).get('comments_context'),
+                )
+            except (TypeError, ValueError) as schema_error:
+                return {"error_msg": _("AI result failed validation: {0}").format(schema_error)}
 
             # Inject dynamic provider, model, and duration
             elapsed = time.time() - start_time
             metadata['ai_provider'] = provider
             metadata['ai_model_used'] = model_name
             metadata['api_duration'] = round(elapsed, 1)
+            usage = res_json.get('usage', {}) or {}
+            metadata['request_metrics'] = {
+                'request_attempts': attempt + 1, 'retry_wait_seconds': retry_wait_seconds,
+                'attempt_timings': request_timings, 'response_characters': len(raw_text),
+                'response_bytes': len(response_body),
+                'output_tokens': usage.get('completion_tokens', usage.get('output_tokens',
+                                    (res_json.get('usageMetadata', {}) or {}).get('candidatesTokenCount'))),
+                'reasoning_tokens': (usage.get('completion_tokens_details') or {}).get('reasoning_tokens'),
+                'deepseek_thinking': payload.get('thinking', {}).get('type') if provider == 'DeepSeek' else None,
+            }
+            if ((metadata.get('translation_status') == 'needs_translation'
+                 or (metadata.get('title_language_hint') in {'ja', 'ko', 'en'}
+                     and metadata.get('filename_role_status') == 'uncertain'))
+                    and metadata.get('filename_role_status') != 'invalid'
+                    and not (context or {}).get('translation_repair_source')):
+                repair_context = dict(context or {}, translation_repair_source=(
+                    metadata.get('filename_roles', {}).get('title_text') or metadata['original_title']))
+                repaired = AIVisionAction.run_api_request(self, book_id, cover_path, api_key_ignored, repair_context)
+                metadata['request_metrics']['translation_repair_attempts'] = 1
+                if isinstance(repaired, tuple):
+                    repaired_metadata = repaired[1]
+                    previous = metadata['request_metrics']
+                    metrics = repaired_metadata['request_metrics']
+                    for key in ('request_attempts', 'retry_wait_seconds', 'response_characters', 'response_bytes'):
+                        metrics[key] = metrics.get(key, 0) + previous.get(key, 0)
+                    if metrics.get('output_tokens') is not None and previous.get('output_tokens') is not None:
+                        metrics['output_tokens'] += previous['output_tokens']
+                    else:
+                        metrics['output_tokens'] = None
+                    if metrics.get('reasoning_tokens') is not None and previous.get('reasoning_tokens') is not None:
+                        metrics['reasoning_tokens'] += previous['reasoning_tokens']
+                    else:
+                        metrics['reasoning_tokens'] = None
+                    metrics['attempt_timings'] = previous['attempt_timings'] + metrics['attempt_timings']
+                    metrics['translation_repair_attempts'] = 1
+                    repaired_metadata['api_duration'] = round(time.time() - start_time, 1)
+                    return (book_id, repaired_metadata, cover_path, context)
+                metadata['warnings'].append('Translation correction failed: ' + str(repaired.get('error_msg', 'unknown error')))
+                metadata['api_duration'] = round(time.time() - start_time, 1)
 
             # --- ROMAN NUMERAL CONVERTER ---
             import re
@@ -839,34 +1084,8 @@ class AIVisionAction(InterfaceAction):
                 metadata['issue_number'] = convert_roman_to_arabic(str(metadata['issue_number']))
             # -------------------------------
             
-            try:
-                # 1. Ensure we have a valid year first
-                pub_year_raw = metadata.get('pub_year')
-                if not pub_year_raw or not str(pub_year_raw).strip().isdigit():
-                    raise ValueError
-                pub_year = int(pub_year_raw)
-                
-                # 2. Safely parse month and day (If AI gives "00" or empty, assume the 1st)
-                pm = metadata.get('pub_month')
-                pub_month = int(pm) if pm and str(pm).isdigit() and int(pm) > 0 else 1
-                
-                pd = metadata.get('pub_day')
-                pub_day = int(pd) if pd and str(pd).isdigit() and int(pd) > 0 else 1
-
-                # 3. Calculate Julian and Weekly values safely
-                dt = datetime.date(pub_year, pub_month, pub_day)
-                yday = dt.timetuple().tm_yday
-                metadata['day_of_year'] = str(yday)
-                
-                week_num = (yday - 1) // 7 + 1
-                metadata['week_of_year'] = f"{pub_year}.{str(week_num).zfill(2)}"
-                
-            except Exception:
-                # If date parsing fails completely, do NOT inject a fake "1"
-                pass 
-                
             # --- Return the cover_path along with the ID and metadata ---
-            return (book_id, metadata, cover_path)
+            return (book_id, metadata, cover_path, context)
             # ------------------------------------------------------------
 
         except Exception as e:
@@ -874,228 +1093,173 @@ class AIVisionAction(InterfaceAction):
 
     def job_finished(self, job):
         if job.failed:
-            return self.gui.job_exception(job, dialog_title=_("AI Vision Failed"))
+            reason = str(getattr(job, 'exception', '') or _('The AI job failed.'))
+            self._record_result(self.active_book_id, 'skipped', reason)
+            if self.review_each:
+                self.gui.job_exception(job, dialog_title=_("AI Vision Failed"))
+            else:
+                self._show_error_dialog(reason)
+            self.pending_context.pop(self.active_book_id, None)
+            self.process_next_in_queue()
+            return
 
         result = job.result
 
-        if "error_msg" in result:
+        if isinstance(result, dict) and 'error_msg' in result:
+            self._record_result(self.active_book_id, 'skipped', result['error_msg'])
             self.signals.error_signal.emit(result["error_msg"])
+            self.pending_context.pop(self.active_book_id, None)
+            self.process_next_in_queue()
             return
-        else:
-            book_id, metadata, cover_path = job.result
-
-            # --- NEW: Intercept and Bypass the UI for Blind Batch ---
-            if getattr(self, 'is_blind_batch', False):
-                structured_data = {}
-
-                # 1. Transform AI raw data into Calibre formats
-                raw_creators = metadata.get('creators', metadata.get('author', metadata.get('editor', [])))
-                creators_str = ", ".join(raw_creators) if isinstance(raw_creators, list) else str(raw_creators)
-
-                year_raw = metadata.get('pub_year')
-                if year_raw and str(year_raw).strip().isdigit():
-                    year = str(year_raw).strip()
-                    month_raw = metadata.get('pub_month')
-                    month = str(month_raw).strip().zfill(2) if month_raw and str(month_raw).strip().isdigit() else "01"
-                    day_raw = metadata.get('pub_day')
-                    day = str(day_raw).strip().zfill(2) if day_raw and str(day_raw).strip().isdigit() else "01"
-                    pub_date = f"{year}-{month}-{day}"
-                else:
-                    pub_date = ""
-
-                vol = str(metadata.get('volume', '')).strip()
-                iss = str(metadata.get('issue_number', '')).strip()
-                series_index = ""
-                if vol and iss and vol.isdigit() and iss.isdigit():
-                    series_index = f"{vol}.{iss.zfill(2)}"
-                elif iss:
-                    series_index = iss
-                elif vol:
-                    series_index = vol
-
-                # Build a mapped dictionary mimicking the UI output
-                mapped_metadata = {
-                    'title': metadata.get('title', ''),
-                    'authors': creators_str,
-                    'publisher': metadata.get('publisher', ''),
-                    'pubdate': pub_date,
-                    'series': metadata.get('series', ''),
-                    'series_index': series_index,
-                    'tags': ", ".join(metadata.get('tags', [])) if isinstance(metadata.get('tags', []), list) else str(
-                        metadata.get('tags', '')),
-                    'identifiers': metadata.get('ids', ''),
-                    'comments': metadata.get('comments', ''),
-                    'languages': ", ".join(metadata.get('languages', ['eng'])) if isinstance(
-                        metadata.get('languages', ['eng']), list) else str(metadata.get('languages', 'eng'))
-                }
-
-                # 2. Filter by the fields the user checked in the warning dialog
-                for key, action in self.approved_batch_fields.items():
-                    val = mapped_metadata.get(key, "")
-                    if val:
-                        structured_data[key] = {'value': val, 'action': action}
-
-                    # Specifically handle the shared Series & Index checkbox
-                    if key == 'series' and mapped_metadata.get('series_index'):
-                        structured_data['series_index'] = {'value': mapped_metadata['series_index'], 'action': action}
-
-                self.apply_metadata(book_id, structured_data)
-                self.process_next_in_queue()
-            else:
+        try:
+            book_id, metadata, cover_path, context = job.result
+            self.pending_context[book_id] = context or self.pending_context.get(book_id, {})
+            if self.review_each:
                 self.signals.review_signal.emit(book_id, metadata, cover_path)
+                return
+            approved_data = prepare_automatic_update(metadata)
+            if approved_data:
+                self.apply_metadata(book_id, approved_data)
+            else:
+                reason = ('filename_roles_' + metadata['filename_role_status']
+                          if metadata.get('filename_role_status') in {'invalid', 'uncertain'} else
+                          'Japanese title was not translated' if metadata.get('translation_status') == 'needs_translation'
+                          else 'no_supported_title')
+                self._record_result(book_id, 'skipped', reason, metadata)
+        except Exception as error:
+            self._record_result(self.active_book_id, 'skipped', str(error))
+            self.signals.error_signal.emit(str(error))
+        self.pending_context.pop(self.active_book_id, None)
+        self.process_next_in_queue()
 
     def _show_review_dialog(self, book_id, metadata, cover_path):
         try:
+            if self.gui.current_db.new_api is not self.queue_db or self.gui.current_db.new_api.library_id != self.queue_library_id:
+                self._record_result(book_id, 'skipped', 'library_changed', metadata)
+                self.batch_queue.clear()
+                self.signals.error_signal.emit(_("Library changed. This analysis result was discarded."))
+                return
             from calibre_plugins.ai_vision_metadata.ui import MetadataReviewDialog
             from calibre.gui2 import error_dialog
+
+            # A review also edits the current calibre record. Keep AI suggestions
+            # when present and fill only missing suggestions from existing fields.
+            current_mi = self.queue_db.get_metadata(book_id)
+            metadata = dict(metadata or {})
+            existing_values = {
+                'title': getattr(current_mi, 'title', '') or '',
+                'creators': list(getattr(current_mi, 'authors', None) or []),
+                'series': getattr(current_mi, 'series', '') or '',
+                'tags': list(getattr(current_mi, 'tags', None) or []),
+                'languages': list(getattr(current_mi, 'languages', None) or []),
+                'publisher': getattr(current_mi, 'publisher', '') or '',
+                'comments': getattr(current_mi, 'comments', '') or '',
+                'ids': ', '.join(f'{k}:{v}' for k, v in (getattr(current_mi, 'identifiers', None) or {}).items()),
+            }
+            series_index = getattr(current_mi, 'series_index', None)
+            if series_index not in (None, ''):
+                existing_values['volume'] = str(series_index).rstrip('0').rstrip('.') if isinstance(series_index, float) else str(series_index)
+            pubdate = getattr(current_mi, 'pubdate', None)
+            pubdate_text = pubdate.strftime('%Y-%m-%d') if hasattr(pubdate, 'strftime') else str(pubdate or '')[:10]
+            if pubdate_text and not pubdate_text.startswith(('0001-', '0101-')):
+                existing_values['existing_pubdate'] = pubdate_text
+            for key, value in existing_values.items():
+                if not metadata.get(key) and value:
+                    metadata[key] = value
+            metadata['existing_metadata_mode'] = True
+            metadata['comments_write_allowed'] = True
+            def library_values(field):
+                cache_key = (self.queue_library_id, field)
+                if cache_key in self.library_value_cache:
+                    return list(self.library_value_cache[cache_key])
+                values = set()
+                try:
+                    raw_values = self.queue_db.all_field_for(field)
+                    values.update(str(value).strip() for value in (raw_values or []) if str(value).strip())
+                except (AttributeError, TypeError, ValueError):
+                    pass
+                try:
+                    if not values:
+                        categories = self.queue_db.get_categories()
+                        category = (categories or {}).get(field, (categories or {}).get('#' + field, []))
+                        for item in category:
+                            value = getattr(item, 'name', item)
+                            if isinstance(value, (tuple, list)):
+                                value = value[0] if value else ''
+                            if str(value).strip():
+                                values.add(str(value).strip())
+                except (AttributeError, TypeError, ValueError):
+                    pass
+                # Some Calibre releases expose neither helper for the new API.
+                # Scan native metadata as a final, version-independent fallback.
+                try:
+                    for candidate_id in self.queue_db.all_book_ids():
+                        current = self.queue_db.get_metadata(candidate_id)
+                        for value in (getattr(current, field, None) or []):
+                            if str(value).strip():
+                                values.add(str(value).strip())
+                except (AttributeError, TypeError, ValueError):
+                    pass
+                result = sorted(values, key=str.casefold)
+                self.library_value_cache[cache_key] = result
+                return list(result)
+            metadata['tag_options'] = library_values('tags')
+            metadata['language_options'] = library_values('languages')
             
             # Pass the cover_path into the Dialog
             d = MetadataReviewDialog(self.gui, metadata, cover_path)
-            result = d.exec_()
+            result = d.exec()
             
-            approved_data = d.get_approved_data() if result == d.Accepted else None
+            approved_data = d.get_approved_data() if result == d.DialogCode.Accepted else None
+            if approved_data is not None:
+                approved_data['_analysis_record'] = metadata
             
             d.setParent(None)
             d.deleteLater()
             
             if approved_data:
                 self.apply_metadata(book_id, approved_data)
+            else:
+                self._record_result(book_id, 'skipped', 'review_cancelled', metadata)
                 
         except Exception as e:
+            self._record_result(book_id, 'skipped', str(e), metadata)
             from calibre.gui2 import error_dialog
             error_dialog(self.gui, _('UI Error'), _('Could not launch review: {0}').format(str(e)), show=True)
             
         finally:
+            self.pending_context.pop(book_id, None)
             # --- Trigger the next book in the queue when the window closes ---
             self.process_next_in_queue()
             # -----------------------------------------------------------------
 
     def _show_error_dialog(self, error_msg):
         """Safely displays error messages on the main GUI thread."""
+        if not self.review_each:
+            print('AI Filename Metadata:', error_msg)
+            self._status_message(error_msg)
+            return
         from calibre.gui2 import error_dialog
         error_dialog(self.gui, _("AI Vision Error"), error_msg, show=True)
 
     def apply_metadata(self, book_id, approved_data):
         db = self.gui.current_db.new_api
-        mi = db.get_metadata(book_id)
-
-        # --- Helper to cleanly extract value and action ---
-        def get_val_action(key):
-            if key in approved_data:
-                data = approved_data[key]
-                if isinstance(data, dict):
-                    return data.get('value'), data.get('action', 'overwrite')
-                else:
-                    return data, 'overwrite'  # Fallback for edge cases
-            return None, None
-
-        # 1. Languages
-        val, action = get_val_action('languages')
-        if val is not None:
-            new_langs = [l.strip().lower() for l in val.split(',') if l.strip()]
-            if new_langs:
-                if action == 'append' and mi.languages:
-                    # Append while maintaining uniqueness (preserves order)
-                    mi.languages = list(dict.fromkeys(mi.languages + new_langs))
-                else:
-                    mi.languages = new_langs
-
-        # 2. Title and Title Sort
-        val, action = get_val_action('title')
-        if val is not None:
-            # Title appending is rare, but allowed if strictly requested
-            if action == 'append' and mi.title:
-                mi.title = f"{mi.title} {val}"
-            else:
-                mi.title = val
-
-            from calibre.ebooks.metadata import title_sort
-            lang_code = mi.languages[0] if mi.languages else None
-            mi.title_sort = title_sort(mi.title, lang=lang_code)
-
-        # 3. Authors
-        val, action = get_val_action('authors')
-        if val is not None:
-            new_authors = [a.strip() for a in val.split(',') if a.strip()]
-            if new_authors:
-                if action == 'append' and mi.authors:
-                    existing = mi.authors
-                    for a in new_authors:
-                        if a not in existing:
-                            existing.append(a)
-                    mi.authors = existing
-                else:
-                    mi.authors = new_authors
-
-                from calibre.ebooks.metadata import authors_to_sort_string
-                mi.author_sort = authors_to_sort_string(mi.authors)
-
-        # 4. Series
-        val, action = get_val_action('series')
-        if val is not None:
-            mi.series = val  # Overwrite only, appending series names corrupts indexing
-
-        # 5. Series Index
-        val, action = get_val_action('series_index')
-        if val is not None:
-            try:
-                mi.series_index = float(val)
-            except ValueError:
-                pass
-
-        # 6. Publisher
-        val, action = get_val_action('publisher')
-        if val is not None:
-            if action == 'append' and mi.publisher:
-                mi.publisher = f"{mi.publisher}, {val}"
-            else:
-                mi.publisher = val
-
-        # 7. Pubdate
-        val, action = get_val_action('pubdate')
-        if val is not None:
-            try:
-                import datetime
-                mi.pubdate = datetime.datetime.strptime(val, "%Y-%m-%d")
-            except ValueError:
-                pass
-
-        # 8. Tags
-        val, action = get_val_action('tags')
-        if val is not None:
-            new_tags = [t.strip() for t in val.split(',') if t.strip()]
-            existing_tags = mi.tags if mi.tags else []
-
-            if action == 'append':
-                for tag in new_tags:
-                    if tag not in existing_tags:
-                        existing_tags.append(tag)
-                mi.tags = existing_tags
-            else:
-                mi.tags = new_tags
-
-        # 9. Identifiers (Dictionary Logic)
-        val, action = get_val_action('identifiers')
-        if val is not None:
-            existing_ids = mi.identifiers if (action == 'append' and mi.identifiers) else {}
-
-            for pair in val.split(','):
-                if ':' in pair:
-                    k, v = pair.split(':', 1)
-                    existing_ids[k.strip().lower()] = v.strip()
-
-            mi.identifiers = existing_ids
-
-        # 10. Comments (HTML Formatting)
-        val, action = get_val_action('comments')
-        if val is not None:
-            existing_comments = mi.comments if mi.comments else ""
-
-            if action == 'append' and existing_comments.strip():
-                mi.comments = f"{existing_comments}<br><br><b>AI Summary:</b><br>{val}"
-            else:
-                mi.comments = val
-
-        # --- Finalize Data and Force Calibre Refresh ---
-        db.set_metadata(book_id, mi)
-        self.gui.library_view.model().refresh_ids([book_id])
+        context = self.pending_context.get(book_id, {})
+        if db is not self.queue_db or not context:
+            self._record_result(book_id, 'skipped', 'analysis_context_or_library_changed', approved_data.get('_analysis_record'))
+            self.signals.error_signal.emit(_("The analysis context or library changed. Metadata was not written."))
+            return False
+        result = apply_metadata_safely(
+            db, book_id, approved_data,
+            snapshot=context.get('snapshot'),
+            expected_library_id=context.get('library_id'),
+        )
+        if result.get('status') == 'conflict':
+            self._record_result(book_id, 'skipped', result.get('reason', 'conflict'), approved_data.get('_analysis_record'))
+            self.signals.error_signal.emit(_("Metadata was not written safely: {0}").format(result.get('reason', 'conflict')))
+            return False
+        self._record_result(book_id, result.get('status', 'unchanged'), metadata=approved_data.get('_analysis_record'))
+        if result.get('status') == 'written':
+            self.gui.library_view.model().refresh_ids([book_id])
+            return True
+        return False

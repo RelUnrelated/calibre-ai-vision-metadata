@@ -1,80 +1,114 @@
-# AI Vision Metadata
+# 漫元 MetaManga
 
-**Version:** 1.2.0  
-**Author:** RelUnrelated (<dan@relunrelated.com>)  
-**License:** GNU General Public License v3.0 (GPLv3) — See the `LICENSE.md` file for details.  
-**Changelog:** See the `CHANGELOG.md` file for release history and updates.  
+**版本：** 1.0.0
+**原项目作者：** RelUnrelated（<dan@relunrelated.com>）
+**许可证：** GNU General Public License v3.0（GPLv3），详见 `LICENSE.md`。
+**更新记录：** 详见 `CHANGELOG.md`。
 
----
+## 项目简介
 
-## Overview
-AI Vision Metadata is a custom Calibre plugin designed to automate the extraction of metadata from publication covers. By leveraging state-of-the-art AI vision models, it analyzes cover art to identify specific issue numbers, publication dates, publishers, and creators, making it an invaluable tool for cataloging comics, magazines, and vintage periodicals.
+漫元是一个用于 Calibre 的 AI 元数据插件，直接读取文件名，并结合现有书籍元数据提取漫画标题、作者、丛书、卷号、语言和备注，在需要时翻译标题。
 
-Originally built around Google's Gemini API, the plugin has evolved into a robust, multi-agent engine tailored for power users.
+插件只发送文件名和元数据文本，不上传或分析封面图片。中文标题优先保留；日语、英语、韩语以及混合语言标题可以交给配置的 AI 翻译为简体中文。
 
-## Key Features
+项目基于 [calibre-ai-vision-metadata](https://github.com/RelUnrelated/calibre-ai-vision-metadata) 修改，并保留原项目的 GPL-3.0 许可证和内部配置兼容性。
 
-* **Multi-Provider Routing:** Seamlessly switch between cloud-based AI models (Google Gemini, OpenAI, Anthropic, OpenRouter) or route requests to your own local, offline models using Ollama or LM Studio.
-* **Sequential Batch Processing:** Select multiple publications at once. The plugin intelligently queues the requests in the background, preventing rate-limit bans and UI lockups.
-* **Blind Batch Bypass:** Power users can process dozens of books automatically without manual review, using a dedicated safety dialog to map specific fields for background application.
-* **Side-by-Side Review GUI:** Never fly blind. The plugin presents a crisp, scaled thumbnail of the cover image right next to the extracted metadata, allowing you to easily verify the AI's accuracy.
-* **Isolated Memory Banks:** The configuration menu securely remembers your distinct API keys, model selections, and custom system prompts for every individual provider.
-* **Advanced Prompt Tuning:** Directly edit the AI's core instructions to fine-tune extraction behavior for the unique quirks of your specific collection.
-* **Thread-Safe Architecture:** Background processing ensures your main Calibre window never freezes, while gracefully catching and reporting network or API errors.
+## 主要功能
 
-## Installation
-Since this is a custom plugin, it must be installed manually through Calibre's interface.
+- 支持 Google Gemini、OpenAI、DeepSeek、Anthropic、OpenRouter，以及 Ollama / LM Studio 本地模型。
+- 支持日语、英语、韩语和多语言混合标题识别与中文翻译。
+- 从文件名和 Calibre 元数据中识别标题、作者、社团、翻译组、丛书、卷号、章节和备注。
+- 支持批量分析、后台逐本处理、自动应用和逐本审核。
+- 逐本审核窗口可以编辑标题、作者、丛书、序号、标签、语言、出版社、出版日期、标识符和备注。
+- 标签下拉列表读取当前 Calibre 书库正在使用的标签。
+- 保留原始标题、原始文件名和分析记录，方便复核和恢复。
+- 内置基于 Kavita 命名规则的卷号、章节号和范围识别逻辑。
 
-1. Download the release archive. Inside, you will find the `AI_Vision_Metadata_v1.2.0.zip` plugin file. *(Do not unzip this plugin file)*.
-2. Open Calibre and click on **Preferences** (the gear icon) in the top toolbar.
-3. Under the "Advanced" section, click on **Plugins**.
-4. Click the **Load plugin from file** button in the bottom right corner.
-5. Navigate to and select the `AI_Vision_Metadata_v1.2.0.zip` file.
-6. Click **Yes** to accept the security warning and install the plugin.
-7. Restart Calibre for the changes to take effect.
+## 安装
 
-## Configuration
-Before using the tool, you must configure it with an API key or a local server address.
+1. 下载 `MetaManga_v1.0.0.zip`，不要解压。
+2. 打开 Calibre，进入“首选项 → 插件”。
+3. 点击右下角“从文件加载插件”，选择该 ZIP 文件。
+4. 确认安全提示并重启 Calibre。
 
-1. Go to **Preferences > Plugins** and locate **AI Vision Metadata** under the *User interface action* category. Double-click to open the configuration window.
-2. **AI Provider:** Select your preferred AI engine from the dropdown (Google Gemini, OpenAI, Anthropic, OpenRouter, or Local). The UI will dynamically update to show the settings for that specific provider. OpenRouter will populate its model list without an API key.
-3. **API Key / Local URL:** Paste your API key for the selected cloud provider. If using a local model, ensure your Local Base URL is correct (e.g., `http://localhost:11434` for Ollama).
-4. **Model Name:** Click **Fetch Available Models** to populate the dropdown menu directly from your chosen provider, then select the specific model you wish to use.
-5. **System Prompt (Advanced):** You can safely tweak the AI's core instructions here. Every provider remembers its own prompt.
-6. Click **Apply** or **OK** to save.
+## 文件名和元数据来源
 
-## Usage
-Once configured, the plugin integrates seamlessly into your standard Calibre workflow.
+插件直接读取文件名进行识别，无需创建自定义文件名列或手动复制文件名。
 
-1. **Select Publications:** Highlight one or more entries in your Calibre library that have cover images. *(Batch processing is fully supported)*.
-2. **Trigger the Plugin:** Click the AI Vision Metadata button in your main toolbar, or right-click the highlighted books and select it from the context menu. To bypass human review entirely, use the dropdown menu to select **Blind Batch Process**.
-3. **Wait for Processing:** The plugin runs in a safe background thread. It will analyze the first image and compile the data.
-4. **Review the Data:** For standard operations, a "Review AI Metadata" window will appear, featuring the cover image on the left and the extracted data on the right. 
-   * **Action Dropdowns:** Fields that support stacking (like Tags, Creators, and Comments) feature explicit **Overwrite / Append** dropdowns. You control exactly how new AI data interacts with your existing Calibre database.
-   * **Checkboxes:** Use the checkboxes to select exactly which fields you want to import. Unchecked fields will be ignored, preserving your existing Calibre database entries.
-   * **Editable Dropdowns:** Fields like *Series Index* offer auto-generated formats, but you can manually type directly into the box for edge cases.
-5. **Apply & Auto-Advance:** Click **OK** to save the checked metadata directly to Calibre. If you selected multiple books, the plugin will seamlessly load the next cover in your queue and begin processing it immediately.
+对于已经编辑过元数据的书籍，插件会同时读取现有元数据，方便在逐本审核窗口中检查、补充和修改。
 
-## Provider Setup Guide
+插件会尽量保留已有的 Comments。空 Comments 会补充原始文件名或历史输入；已有内容不会被无故清空。分析历史中会保存标题来源、原始标题、AI 返回值、置信度和警告。
 
-To use the cloud features of this plugin, you will need to generate an API key from your preferred provider. Treat these keys like passwords. 
+## 命名解析规则
 
-**Google Gemini (Recommended for Free Tier)**
-* Navigate to [Google AI Studio](https://aistudio.google.com/app/apikey) to generate a free API key.
-* *Note on Limits:* `gemini-2.0-flash-lite` offers generous free daily quotas. Using `gemini-2.5-pro` for complex covers and deep web searching is highly recommended, but it requires adding a billing profile to your Google Cloud account to lift strict rate limits.
+支持卷号 `v02`、`Volume 02`、`vol_002`、`t02`、`第2册`、`2巻`、`Vol. 7.5` 和 `v1-v5`，也支持章节号 `ch015`、`Chapter 15.5`、`第15话`、`15話` 和 `ch1-ch6`。
 
-**OpenAI (ChatGPT)**
-* Navigate to the [OpenAI Platform](https://platform.openai.com/api-keys) to generate a key.
-* *Requirements:* OpenAI no longer offers free API grants. You must add prepaid credits (minimum $5) to your developer dashboard for the API to process requests.
+出版物名称中的卷号不会误认为作品卷号，例如 `(COMIC magazine Vol.18)` 不会自动写入作品序号。章节号和范围不会写入 Calibre 的丛书序号。
 
-**Anthropic (Claude)**
-* Navigate to the [Anthropic Console](https://console.anthropic.com/settings/keys) to generate a key.
-* *Requirements:* Like OpenAI, Anthropic requires you to load prepaid credits to your account before API requests will be authorized (otherwise you will receive an immediate HTTP 400 error).
+## 配置
 
-**OpenRouter**
-* Navigate to the [OpenRouter Workspace](https://openrouter.ai/settings/keys) to generate a key.
-* *Requirements:* OpenRouter provides access to a large variety of models from over sixty providers. OpenRouter requires you to load prepaid credits to your account before executing API requests. The list of models in the configuration window will contain all of those which support image input. The model list is available even without an API key.
+进入“首选项 → 插件”，找到“漫元 (MetaManga)”，双击打开配置窗口。
 
-**Local Models (Ollama / LM Studio)**
-* You can run vision-capable models (like `llava`) completely offline on your own hardware.
-* Download [Ollama](https://ollama.com/) or [LM Studio](https://lmstudio.ai/). Make sure your local server is running, verify the Base URL in the plugin settings, and fetch the models you have downloaded.
+1. **AI 提供商：** 选择 Google Gemini、OpenAI、DeepSeek、Anthropic、OpenRouter 或本地模型。
+2. **API 密钥 / 本地地址：** 云端服务填写 API 密钥；本地模型填写地址，例如 `http://localhost:11434`。
+3. **模型：** 点击“获取可用模型”读取模型列表。
+4. **提示词：** 可以为每个 AI 提供商单独编辑系统提示词。
+5. **点击插件时直接应用 AI 元数据：** 勾选后直接写入结果；不勾选时进入审核流程。
+6. 点击“应用”或“确定”保存。
+
+API 密钥保存在 Calibre 用户配置目录中，不会写入插件 ZIP 或 GitHub 源码。Windows 默认位置通常是：
+
+```text
+%APPDATA%\calibre\plugins\metamanga.json
+```
+
+首次使用新版插件时，会自动将旧配置 `ai_vision_metadata.json` 中的 API 密钥、模型、提示词和设置复制到新配置中。已有的非空新配置不会被覆盖，旧文件保留作为备份。
+
+不要把新旧配置文件、`.env` 文件或任何真实 API 密钥提交到远程仓库。
+
+## 使用方法
+
+1. 在 Calibre 书库中选择一本或多本书。
+2. 点击工具栏中的“漫元 MetaManga”，或从右键菜单启动插件。
+3. 插件会在后台逐本分析文件名和元数据文本。
+4. 自动模式会在验证通过后写入支持的字段。
+5. 逐本审核模式会显示 AI 建议和现有元数据，可以直接编辑后保存。
+
+审核窗口中可以直接编辑各项元数据，确认后保存。标签可以从 Calibre 书库已有标签中选择，也可以直接输入；语言显示使用中文名称。出版日期使用 `YYYY-MM-DD` 格式。
+
+## AI 服务
+
+- [Google AI Studio](https://aistudio.google.com/app/apikey)：创建 Gemini API 密钥。
+- [OpenAI Platform](https://platform.openai.com/api-keys)：创建 OpenAI API 密钥。
+- [DeepSeek API Keys](https://platform.deepseek.com/api_keys)：创建 DeepSeek API 密钥。默认关闭思考模式以降低处理时间。
+- [Anthropic Console](https://console.anthropic.com/settings/keys)：创建 Claude API 密钥。
+- [OpenRouter](https://openrouter.ai/settings/keys)：创建 OpenRouter API 密钥并访问多个模型提供商。
+- [Ollama](https://ollama.com/) / [LM Studio](https://lmstudio.ai/)：在本机运行模型，插件只发送文本。
+
+## 运行结果和审核
+
+“最近运行结果”会记录处理状态、请求次数、重试等待时间、响应长度、耗时、翻译状态、文件名角色置信度和警告。
+
+如果 AI 无法可靠区分标题、作者或社团，自动模式会跳过写入，避免错误覆盖元数据。可以使用逐本审核窗口检查并手动修正。
+
+## 开发和打包
+
+运行单元测试：
+
+```powershell
+python -m unittest discover -s tests -v
+```
+
+构建安装包：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build_plugin.ps1
+```
+
+生成的安装包位于 `dist\MetaManga_v1.0.0.zip`。
+
+## 许可证和致谢
+
+本项目基于 [RelUnrelated/calibre-ai-vision-metadata](https://github.com/RelUnrelated/calibre-ai-vision-metadata) 修改，遵循 GPL-3.0。
+
+卷号、章节号和范围识别规则参考了 [Kavita](https://github.com/Kareadita/Kavita)，并根据本项目的漫画文件命名习惯进行了适配。本项目使用的是选择性的规则适配，不包含完整的 Kavita 扫描器；具体说明见 `THIRD_PARTY_NOTICES.md`。

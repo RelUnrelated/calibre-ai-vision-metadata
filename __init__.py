@@ -17,12 +17,22 @@ try:
 except NameError:
     pass
 
+try:
+    from calibre.utils.localization import _ as _CALIBRE_TRANSLATE
+except ImportError:
+    _CALIBRE_TRANSLATE = lambda text: text
+
+def _(text: str) -> str:
+    return {
+        'Extract manga metadata from original filenames without uploading or analyzing cover images.': '从原始文件名提取漫画元数据，不上传或分析封面图片。'
+    }.get(text, _CALIBRE_TRANSLATE(text))
+
 class AIVisionMetadataWrapper(InterfaceActionBase):
-    name                    = 'AI Vision Metadata'
-    description             = _('Automate publication metadata extraction from cover art. Supports cloud APIs and local offline models.')
+    name                    = '漫元 (MetaManga)'
+    description             = _('Extract manga metadata from original filenames without uploading or analyzing cover images.')
     supported_platforms     = ['windows', 'osx', 'linux']
     author                  = 'RelUnrelated'
-    version                 = (1, 2, 0)
+    version                 = (1, 0, 0)
     minimum_calibre_version = (5, 0, 0)
 
     # THIS IS THE MAGIC STRING: 'folder_name.file_name:ClassName'

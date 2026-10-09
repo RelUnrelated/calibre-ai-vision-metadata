@@ -13,6 +13,13 @@ __pycache__/
 .vscode/
 .venv/
 
+# Local secrets and Calibre plugin configuration
+.env
+*.env
+ai_vision_metadata.json
+metamanga.json
+secrets/
+
 # OS generated files
 .DS_Store
 Thumbs.db
